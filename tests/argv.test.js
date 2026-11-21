@@ -102,11 +102,13 @@ test('Tauri の CLI に渡す argv', () => {
 });
 
 test('codesign の argv（ad-hoc と identity）', () => {
-  assert.deepEqual(codesign.signArgs('/x/A.app', {}), ['--force', '--sign', '-', '/x/A.app']);
+  const preserve = '--preserve-metadata=entitlements,flags,runtime';
+  assert.deepEqual(codesign.signArgs('/x/A.app', {}), ['--force', '--sign', '-', preserve, '/x/A.app']);
   assert.deepEqual(codesign.signArgs('/x/A.app', { identity: 'Example Identity', entitlements: '/x/e.plist' }), [
     '--force',
     '--sign',
     'Example Identity',
+    preserve,
     '--options',
     'runtime',
     '--timestamp',

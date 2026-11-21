@@ -59,7 +59,7 @@ test('tauri: ad-hoc で build し、成果物・log・署名の確かめを出�
       {
         kind: 'app',
         path: app,
-        signature: { kind: 'adhoc', identifier: 'com.example.fake', format: 'app bundle with generic', runtime: false },
+        signature: { kind: 'adhoc', identifier: 'com.example.fake', format: 'app bundle with generic', runtime: true },
         verified: true,
       },
     ]);
@@ -153,6 +153,7 @@ test('sign: ad-hoc で署名し直し、確かめる', () =>
     assert.equal(r.json.signing, 'adhoc');
     assert.equal(r.json.verified, true);
     assert.equal(r.json.signature.kind, 'adhoc');
+    assert.equal(r.json.signature.runtime, true, '元の hardened runtime を引き継ぐ');
 
     // 中身を足すと確かめが通らない → 署名し直すと通る
     fs.mkdirSync(path.join(app, 'Contents', 'Resources'), { recursive: true });

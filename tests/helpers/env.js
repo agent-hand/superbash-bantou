@@ -83,7 +83,8 @@ fs.writeFileSync(path.join(app, 'Contents', 'Info.plist'), [
   '</dict></plist>',
 ].join('\\n'));
 if (env.APPLE_SIGNING_IDENTITY) {
-  const r = spawnSync('codesign', ['--force', '-s', env.APPLE_SIGNING_IDENTITY, app], { stdio: 'inherit' });
+  // Tauri の bundler と同じく hardened runtime を付ける。
+  const r = spawnSync('codesign', ['--force', '-s', env.APPLE_SIGNING_IDENTITY, '--options', 'runtime', app], { stdio: 'inherit' });
   if (r.status !== 0) process.exit(1);
 }
 console.log('\\u001b[32m    Finished\\u001b[0m 1 bundle at:');

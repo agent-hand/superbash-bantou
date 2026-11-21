@@ -77,7 +77,7 @@ Tauri の build は数分から十数分かかる。superbash の既定の時間
 - 親の環境の `APPLE_SIGNING_IDENTITY`・`APPLE_CERTIFICATE`・`APPLE_CERTIFICATE_PASSWORD`・`TAURI_SIGNING_PRIVATE_KEY*` は子に渡さない（署名の扱いは host の設定だけで決める。証明書の keychain への import はさせない）。ad-hoc の時は公証の資格（`APPLE_ID`・`APPLE_API_KEY` など）も外す。identity の時はそのまま渡す（公証は Tauri の振る舞いのまま）。
 - updater の鍵は **path を** `TAURI_SIGNING_PRIVATE_KEY` に渡すだけ。macbuild は鍵の中身を読まない・写さない・出力しない（file が有るかだけ見る）。password は `updaterKeyPasswordEnv` の名前の環境変数から引いて `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` に入れ、元の変数は子に渡さない。
 - 出力（stdout・stderr・log）には identity の名前・鍵の path・password を出さない。`macbuild-info` は有無だけを出す。
-- `macbuild-sign` は identity の時 `--options runtime --timestamp` を付ける。bundle の中の入れ子の code（frameworks・sidecar）は署名し直さない（外側だけ）。
+- `macbuild-sign` は元の署名の entitlements・flag（hardened runtime など）・runtime の版を引き継ぐ（`--preserve-metadata=entitlements,flags,runtime`。`entitlements` を渡せばそちらが優先）。identity の時は `--options runtime --timestamp` も付ける。bundle の中の入れ子の code（frameworks・sidecar）は署名し直さない（外側だけ）。
 
 ## 排他（macbuild-tauri）
 

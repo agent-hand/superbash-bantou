@@ -25,10 +25,14 @@ function isDir(p) {
   }
 }
 
+// 署名し直す時に元の署名から引き継ぐ物（entitlements・hardened runtime などの flag・runtime の版）。
+// requirements は引き継がない（identity が変わると designated requirement が合わなくなる）。
+const PRESERVE = '--preserve-metadata=entitlements,flags,runtime';
+
 /** 署名の argv（codesign の後ろ）。ad-hoc は `-`、identity は hardened runtime と timestamp を付ける。 */
 function signArgs(target, { identity, entitlements } = {}) {
   const id = identity || '-';
-  const args = ['--force', '--sign', id];
+  const args = ['--force', '--sign', id, PRESERVE];
   if (id !== '-') args.push('--options', 'runtime', '--timestamp');
   if (entitlements) args.push('--entitlements', entitlements);
   args.push(target);

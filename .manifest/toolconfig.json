@@ -92,7 +92,7 @@
     },
     {
       "name": "macbuild-sign",
-      "description": "指定の成果物（.app・.dmg・実行 file）を host の設定の identity で署名し直す（identity が無ければ ad-hoc）。署名の後に codesign --verify --strict（bundle は --deep も）で確かめ、署名の種類を出す。bundle の中の入れ子の code は署名し直さない（外側だけ）。",
+      "description": "指定の成果物（.app・.dmg・実行 file）を host の設定の identity で署名し直す（identity が無ければ ad-hoc）。元の署名の entitlements と hardened runtime などの flag は引き継ぐ（--entitlements を渡せばそちら）。署名の後に codesign --verify --strict（bundle は --deep も）で確かめ、署名の種類を出す。bundle の中の入れ子の code は署名し直さない（外側だけ）。",
       "category": "sign",
       "tool": "macbuild",
       "version": "0.1.0",
