@@ -1,0 +1,134 @@
+{
+  "$schema": "https://raw.githubusercontent.com/unagents/superbash/main/toolconfig.schema.json",
+  "name": "superbash-macbuild",
+  "description": "mac でしか出来ない build（Tauri）と codesign の署名の窓口。署名の identity と updater の鍵は host の設定から読み、道具の引数にも出力にも出さない。",
+  "owner": { "name": "superbash contributors" },
+  "tools": {
+    "macbuild": { "entry": "main.js" }
+  },
+  "commands": [
+    {
+      "name": "macbuild-info",
+      "description": "この host で使える build の道具（xcodebuild・codesign・sccache・cargo・rustc・node・cargo-tauri）の有無と版、署名の設定が有るか無いか（値は出さない）、build の lock の状態を出す。",
+      "category": "build",
+      "tool": "macbuild",
+      "version": "0.1.0",
+      "spec": {
+        "subcommand": "info",
+        "usage": "macbuild info",
+        "in": {
+          "options": {},
+          "positionals": []
+        },
+        "out": {
+          "stdout": {
+            "format": "json",
+            "description": "{ host: { platform, arch, macos }, developerDir, tools: { <名前>: { available, version, path, note? } }, signing: { mode: adhoc|identity, identity: 有無, updaterKey: 有無, updaterKeyFound, updaterKeyPassword: 有無, updaterKeyPasswordSet }, config: { file, found, sources, error? }, lock: { dir, held, pid?, startedAt?, stale? }, logDir }"
+          },
+          "stderr": "error の時だけ",
+          "exitCodes": {
+            "0": "出せた",
+            "2": "使い方の誤り",
+            "4": "host の設定の誤り（stdout の config.error に理由。道具の有無は出す）"
+          }
+        }
+      }
+    },
+    {
+      "name": "macbuild-tauri",
+      "description": "指定の project の dir で Tauri の build（tauri build --ci）を行い、host の設定の identity で署名する（identity が無ければ ad-hoc）。同時に走る build は 1 本だけで、lock が取れなければ待たずに終わる（終了 code 3）。build のログは file に書き、その path と成果物の path・署名の確かめの結果を出す。長いので superbash の run_in_background で呼び、出力の file を後から読む。",
+      "category": "build",
+      "tool": "macbuild",
+      "version": "0.1.0",
+      "spec": {
+        "subcommand": "tauri",
+        "usage": "macbuild tauri [--target <triple>] [--bundles <list>] [--debug] [--target-dir <dir>] <project>",
+        "in": {
+          "options": {
+            "target": {
+              "flag": "--target",
+              "type": "string",
+              "description": "Rust の target triple（aarch64-apple-darwin・x86_64-apple-darwin・universal-apple-darwin）。省略時は host の target"
+            },
+            "bundles": {
+              "flag": "--bundles",
+              "type": "string",
+              "description": "作る bundle の種類を , で区切る（app・dmg）。省略時は tauri.conf.json の bundle.targets"
+            },
+            "debug": {
+              "flag": "--debug",
+              "type": "boolean",
+              "description": "debug の build にする"
+            },
+            "targetDir": {
+              "flag": "--target-dir",
+              "type": "string",
+              "description": "cargo の target の dir（CARGO_TARGET_DIR として渡す）。省略時は環境の CARGO_TARGET_DIR か cargo の既定"
+            }
+          },
+          "positionals": [
+            {
+              "name": "project",
+              "type": "string",
+              "description": "Tauri の project の dir（src-tauri/ を含む dir）。相対 path は起動した cwd から"
+            }
+          ]
+        },
+        "out": {
+          "stdout": {
+            "format": "json",
+            "description": "{ ok, project, signing: adhoc|identity, updaterKey: 有無, cli, tauriArgs, targetDir, log, artifacts: [{ kind: app|dmg|updater|updater-signature|other, path, signature?: { kind: adhoc|certificate|unsigned, identifier, format, runtime }, verified? }], durationMs }。失敗の時は ok: false と error（と分かれば log）"
+          },
+          "stderr": "進捗（lock を取った・build の開始と log の path・終了）。build が失敗した時は log の末尾",
+          "exitCodes": {
+            "0": "build と、成果物の .app の署名の確かめが通った",
+            "1": "build か署名の確かめが失敗",
+            "2": "使い方の誤り（project が無い・Tauri の project でない）",
+            "3": "別の build が lock を持っている（待たずに終わる。stdout の lock に持ち主）",
+            "4": "host の設定の誤り・道具の不足（codesign・cargo・Tauri の CLI・updater の鍵や password）"
+          }
+        }
+      }
+    },
+    {
+      "name": "macbuild-sign",
+      "description": "指定の成果物（.app・.dmg・実行 file）を host の設定の identity で署名し直す（identity が無ければ ad-hoc）。署名の後に codesign --verify --strict（bundle は --deep も）で確かめ、署名の種類を出す。bundle の中の入れ子の code は署名し直さない（外側だけ）。",
+      "category": "sign",
+      "tool": "macbuild",
+      "version": "0.1.0",
+      "spec": {
+        "subcommand": "sign",
+        "usage": "macbuild sign [--entitlements <plist>] <path>",
+        "in": {
+          "options": {
+            "entitlements": {
+              "flag": "--entitlements",
+              "type": "string",
+              "description": "署名に付ける entitlements の plist の path"
+            }
+          },
+          "positionals": [
+            {
+              "name": "path",
+              "type": "string",
+              "description": "署名し直す成果物の path。相対 path は起動した cwd から"
+            }
+          ]
+        },
+        "out": {
+          "stdout": {
+            "format": "json",
+            "description": "{ ok, path, signing: adhoc|identity, verified, signature: { kind: adhoc|certificate|unsigned, identifier, format, runtime } }。失敗の時は ok: false と error"
+          },
+          "stderr": "codesign の失敗の時の message",
+          "exitCodes": {
+            "0": "署名と確かめが通った",
+            "1": "署名か確かめが失敗",
+            "2": "使い方の誤り（path が無い）",
+            "4": "host の設定の誤り・codesign が無い"
+          }
+        }
+      }
+    }
+  ]
+}

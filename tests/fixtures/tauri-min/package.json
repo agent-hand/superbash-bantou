@@ -1,0 +1,9 @@
+{
+  "name": "tauri-min",
+  "version": "0.1.0",
+  "private": true,
+  "description": "macbuild tauri の確かめ用の最小の Tauri の雛形（画面 1 つ）",
+  "devDependencies": {
+    "@tauri-apps/cli": "2.12.5"
+  }
+}

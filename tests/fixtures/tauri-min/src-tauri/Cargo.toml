@@ -1,0 +1,12 @@
+[package]
+name = "tauri-min"
+version = "0.1.0"
+description = "macbuild tauri の確かめ用の最小の Tauri の雛形"
+edition = "2021"
+publish = false
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }

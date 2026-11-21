@@ -1,0 +1,5 @@
+node_modules/
+tests/fixtures/*/src-tauri/target/
+tests/fixtures/*/src-tauri/gen/
+tests/fixtures/*/src-tauri/Cargo.lock
+tests/fixtures/*/package-lock.json
