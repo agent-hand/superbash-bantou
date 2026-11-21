@@ -1,6 +1,6 @@
 {
-  "$schema": "https://raw.githubusercontent.com/unagents/superbash/main/toolconfig.schema.json",
-  "name": "superbash-macbuild",
+  "$schema": "https://raw.githubusercontent.com/agent-hand/superbash/main/toolconfig.schema.json",
+  "name": "superbash-bantou",
   "description": "mac でしか出来ない build（Tauri）と codesign の署名の窓口。署名の identity・updater の鍵・公証の資格は host の設定から読み、道具の引数にも出力にも出さない。",
   "owner": { "name": "superbash contributors" },
   "tools": {
@@ -12,7 +12,7 @@
       "description": "この host で使える build の道具（xcodebuild・codesign・sccache・cargo・rustc・node・cargo-tauri）の有無と版、署名の設定が有るか無いか（値は出さない）、build の lock の状態を出す。",
       "category": "build",
       "tool": "macbuild",
-      "version": "0.1.1",
+      "version": "0.1.0",
       "spec": {
         "subcommand": "info",
         "usage": "macbuild info",
@@ -39,7 +39,7 @@
       "description": "指定の project の dir で Tauri の build（tauri build --ci）を行い、host の設定の identity で署名する（identity が無ければ ad-hoc）。identity の時だけ、host の設定が名前で指す環境変数から公証の資格（APPLE_ID・APPLE_PASSWORD・APPLE_TEAM_ID・APPLE_API_KEY・APPLE_API_ISSUER・APPLE_API_KEY_PATH・APPLE_PROVIDER_SHORT_NAME）を Tauri に渡す（親の環境の APPLE_* は渡さない）。同時に走る build は 1 本だけで、lock が取れなければ待たずに終わる（終了 code 3）。build のログは秘密を伏せて file に書き、その path と成果物の path（伏せる前の出力から拾う）・署名の確かめの結果を出す。長いので superbash の run_in_background で呼び、出力の file を後から読む。",
       "category": "build",
       "tool": "macbuild",
-      "version": "0.1.1",
+      "version": "0.1.0",
       "spec": {
         "subcommand": "tauri",
         "usage": "macbuild tauri [--target <triple>] [--bundles <list>] [--debug] [--target-dir <dir>] <project>",
@@ -95,7 +95,7 @@
       "description": "指定の成果物（.app・.dmg・実行 file）を host の設定の identity で署名し直す（identity が無ければ ad-hoc）。元の署名の entitlements と hardened runtime などの flag は引き継ぐ（--entitlements を渡せばそちら）。identity の時は timestamp を付ける（no-timestamp で外せる）。署名の後に codesign --verify --strict（bundle は --deep も）で確かめ、署名の種類を出す。bundle の中の入れ子の code は署名し直さない（外側だけ）。",
       "category": "sign",
       "tool": "macbuild",
-      "version": "0.1.1",
+      "version": "0.1.0",
       "spec": {
         "subcommand": "sign",
         "usage": "macbuild sign [--entitlements <plist>] [--no-timestamp] <path>",

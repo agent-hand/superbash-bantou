@@ -248,6 +248,20 @@ test('Tauri の出力から成果物の path を拾う（色の escape を除く
   assert.equal(tauri.artifactKind('/a/x.app.tar.gz.sig'), 'updater-signature');
 });
 
+test('成果物の path は流しながら拾う（区切りの途中・stream の混ざり・長すぎる行）', () => {
+  const c = tauri.finishedCollector();
+  c.feed('    Compiling x\n\u001b[32m    Fini', 'stderr');
+  c.feed('noise on stdout\n', 'stdout');
+  c.feed('shed\u001b[0m 2 bundles at:\n        /t/b/A.app\n', 'stderr');
+  c.feed('/not/a/bundle/path on stdout\n', 'stdout'); // stdout の行は stderr の block に入らない
+  c.feed('        /t/b/A', 'stderr');
+  c.feed('.dmg\n    Done\n        /t/after/block\n', 'stderr');
+  c.feed('    Finished 1 bundle at:\n' + 'x'.repeat(70 * 1024), 'stdout'); // 改行の無い長すぎる行
+  c.feed('/still/the/long/line\n        /t/next/line\n', 'stdout');
+  c.feed('    Finished 1 updater signature at:\n        /t/b/A.app.tar.gz.sig', 'stdout'); // 最後に改行が無い
+  assert.deepEqual(c.paths(), ['/t/b/A.app', '/t/b/A.dmg', '/t/b/A.app.tar.gz.sig']);
+});
+
 test('codesign -dv の出力から署名の種類を読む（Authority は出さない）', () => {
   const adhoc = codesign.parseDescribe(
     [

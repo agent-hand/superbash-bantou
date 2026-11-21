@@ -31,10 +31,10 @@ test('何も無い時は既定（ad-hoc・lock と log は home の Library の�
     assert.equal(codesignIdentity(c), '-');
     assert.equal(c.identity, null);
     assert.equal(c.updaterKeyPath, null);
-    assert.equal(c.lockDir, path.join(home, 'Library', 'Caches', 'superbash-macbuild'));
-    assert.equal(c.logDir, path.join(home, 'Library', 'Logs', 'superbash-macbuild'));
+    assert.equal(c.lockDir, path.join(home, 'Library', 'Caches', 'superbash-bantou'));
+    assert.equal(c.logDir, path.join(home, 'Library', 'Logs', 'superbash-bantou'));
     assert.deepEqual(c.file, { path: defaultConfigPath(home), explicit: false, found: false });
-    assert.equal(c.file.path, path.join(home, '.config', 'superbash-macbuild', 'config.json'));
+    assert.equal(c.file.path, path.join(home, '.config', 'superbash-bantou', 'config.json'));
     assert.deepEqual(c.sources, {
       identity: 'unset',
       updaterKeyPath: 'unset',

@@ -66,9 +66,26 @@ test('N1: identity を team id 抜きの前方一致の名前で設定した時�
   for (const secret of [prefix, 'FAKE123456', 'FAKE654321', 'login.keychain-db']) {
     assert.equal(out.includes(secret), false, `${secret} が残っている: ${out}`);
   }
-  assert.equal(out, 'error: <identity>: ambiguous (matches "<identity> (<team-id>)" and "<identity>(<team-id>)" in <keychain>)');
+  assert.equal(out, 'error: <identity>: ambiguous (matches "<identity-candidate>" and "<identity-candidate>" in <keychain>)');
+  // ambiguous の行でなくても、伏せた identity の直後の team id は伏せる。
+  assert.equal(redact(`found "${prefix} (FAKE123456)"`), 'found "<identity> (<team-id>)"');
   // identity の直後でない 10 文字の括弧（ほかの文脈）は変えない。
   assert.equal(redact('build (ABCDEFGHIJ) done'), 'build (ABCDEFGHIJ) done');
+});
+
+test('N1: identity が候補の名前より短い前方一致の時、ambiguous の行の候補の全体（名前の残りと team id）を伏せる', () => {
+  const prefix = 'Developer ID Application: Fake';
+  const redact = makeRedactor(secretsOf({ signingMode: 'identity', identity: prefix }, {}));
+  const message =
+    `error: ${prefix}: ambiguous (matches "${prefix} Example Corp (FAKE123456)" and ` +
+    `"${prefix} Other Labs Ltd (FAKE654321)" in /var/example/Library/Keychains/login.keychain-db)`;
+  const out = redact(message);
+  for (const secret of [prefix, 'Example Corp', 'Other Labs Ltd', 'FAKE123456', 'FAKE654321', 'login.keychain-db']) {
+    assert.equal(out.includes(secret), false, `${secret} が残っている: ${out}`);
+  }
+  assert.equal(out, 'error: <identity>: ambiguous (matches "<identity-candidate>" and "<identity-candidate>" in <keychain>)');
+  // ambiguous でない行の引用符（Tauri の「Signing with identity」など）は候補として扱わない。
+  assert.equal(redact(`Signing with identity "${prefix}"`), 'Signing with identity "<identity>"');
 });
 
 test('ad-hoc（`-`）と短すぎる値は伏せない（log を壊さない）', () => {

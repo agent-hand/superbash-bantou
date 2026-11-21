@@ -8,7 +8,8 @@
 //   updater の鍵は path を TAURI_SIGNING_PRIVATE_KEY に、password は設定の環境変数名の値を TAURI_SIGNING_PRIVATE_KEY_PASSWORD に入れる。
 //   identity の時だけ、公証の資格を設定の環境変数名の値から Tauri の名前（APPLE_ID など）で入れる。
 // - build の出力は行ごとに秘密を伏せて log の file に書く。stderr には進捗だけ、失敗の時は（伏せた）log の末尾を出す。
-//   成果物の path は伏せる前の出力から拾う（秘密の値が path の一部と一致しても path を壊さない）。
+//   成果物の path は伏せる前の出力から、流しながら拾う（秘密の値が path の一部と一致しても path を壊さない）。
+//   出力の全体は memory に溜めず、「Finished … at:」の後の path の行だけを持つ。
 
 const fs = require('node:fs');
 const os = require('node:os');
@@ -81,19 +82,68 @@ function artifactKind(p) {
 
 const ANSI_RE = /\x1b\[[0-9;]*[A-Za-z]/g;
 
-/** Tauri の「Finished N bundle(s) at:」「Finished N updater signature(s) at:」の下の path を拾う。 */
-function parseFinishedPaths(text) {
-  const lines = text.replace(ANSI_RE, '').split('\n');
-  const found = [];
-  for (let i = 0; i < lines.length; i++) {
-    if (!/Finished \d+ .* at:\s*$/.test(lines[i])) continue;
-    for (let j = i + 1; j < lines.length; j++) {
-      const s = lines[j].trim();
-      if (!s.startsWith('/')) break;
-      found.push(s);
+const FINISHED_RE = /Finished \d+ .* at:\s*$/;
+// 1 行の上限。改行の無いこれより長い出力は path でも header でもないとみなし、次の改行まで読み捨てる。
+const MAX_LINE = 64 * 1024;
+
+/**
+ * Tauri の「Finished N bundle(s) at:」「Finished N updater signature(s) at:」の下の path を、出力を流しながら拾う。
+ * 持つのは拾った path と、stream ごとの行の途中（次の改行まで。上限 MAX_LINE）と「header の後か」の状態だけ。
+ */
+function finishedCollector() {
+  const found = new Set();
+  const streams = new Map();
+  const onLine = (st, text) => {
+    const s = text.replace(ANSI_RE, '');
+    if (st.inBlock) {
+      const t = s.trim();
+      if (t.startsWith('/')) {
+        found.add(t);
+        return;
+      }
+      st.inBlock = false;
     }
-  }
-  return [...new Set(found)];
+    if (FINISHED_RE.test(s)) st.inBlock = true;
+  };
+  return {
+    feed(text, name = 'out') {
+      let st = streams.get(name);
+      if (!st) {
+        st = { partial: '', inBlock: false, skipping: false };
+        streams.set(name, st);
+      }
+      let rest = text;
+      if (st.skipping) {
+        const nl = rest.indexOf('\n');
+        if (nl < 0) return;
+        rest = rest.slice(nl + 1);
+        st.skipping = false;
+      }
+      const parts = (st.partial + rest).split('\n');
+      st.partial = parts.pop();
+      for (const p of parts) onLine(st, p);
+      if (st.partial.length > MAX_LINE) {
+        st.partial = '';
+        st.inBlock = false;
+        st.skipping = true;
+      }
+    },
+    /** 拾った path（出た順、重複なし）。stream の最後の改行の無い行も読む。 */
+    paths() {
+      for (const st of streams.values()) {
+        if (st.partial && !st.skipping) onLine(st, st.partial);
+        st.partial = '';
+      }
+      return [...found];
+    },
+  };
+}
+
+/** 文字列の全体から拾う（finishedCollector と同じ規則）。 */
+function parseFinishedPaths(text) {
+  const c = finishedCollector();
+  c.feed(text);
+  return c.paths();
 }
 
 /** log から拾えなかった時: target の dir の bundle/ を見る（build の開始の後に出来た物だけ）。 */
@@ -206,7 +256,7 @@ async function build(values, { stderr = process.stderr, env = process.env, cwd =
   process.on('exit', held.release);
 
   const logPath = path.join(config.logDir, `tauri-${stamp(new Date(started))}-${process.pid}.log`);
-  let rawOutput = ''; // 伏せる前の出力（memory の中だけ。成果物の path を拾う）
+  const finished = finishedCollector(); // 伏せる前の出力から成果物の path だけを拾う
   try {
     say(`lock を取った: ${held.path}`);
     const fd = fs.openSync(logPath, 'a');
@@ -230,9 +280,7 @@ async function build(values, { stderr = process.stderr, env = process.env, cwd =
         env: childEnv,
         fd,
         redact,
-        tap: (raw) => {
-          rawOutput += raw;
-        },
+        tap: (raw, name) => finished.feed(raw, name),
         onSpawn: (c) => {
           child = c;
         },
@@ -256,8 +304,7 @@ async function build(values, { stderr = process.stderr, env = process.env, cwd =
       fs.closeSync(fd);
     }
 
-    let paths = parseFinishedPaths(rawOutput).filter((p) => fs.existsSync(p));
-    rawOutput = '';
+    let paths = finished.paths().filter((p) => fs.existsSync(p));
     if (paths.length === 0) {
       paths = scanBundleDir({ project, targetDir, target: values.target, debug: values.debug, since: started });
     }
@@ -311,5 +358,6 @@ module.exports = {
   tauriEnv,
   findTauriCli,
   parseFinishedPaths,
+  finishedCollector,
   artifactKind,
 };

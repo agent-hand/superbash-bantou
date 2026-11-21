@@ -320,7 +320,7 @@ test('N1: identity を team id 抜きで設定した時の ambiguous の message
     const r = signArtifact({ path: target }, { env, stderr: { write() {} }, tool });
     assert.equal(r.exitCode, EXIT.FAIL);
     assertNoSecrets(r.result.error, [prefix, 'FAKE123456', 'FAKE654321', 'Keychains'], 'sign の error');
-    assert.match(r.result.error, /"<identity> \(<team-id>\)" and "<identity> \(<team-id>\)" in <keychain>/);
+    assert.match(r.result.error, /"<identity-candidate>" and "<identity-candidate>" in <keychain>/);
   }));
 
 test('L2: codesign の呼び出しと info の版の照会の子に、署名・公証・updater の秘密の変数を渡さない', () =>

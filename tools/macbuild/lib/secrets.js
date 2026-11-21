@@ -20,6 +20,10 @@ const TEAM_ID_RE = /\(([A-Z0-9]{10})\)\s*$/;
 // 伏せた identity の直後の team id。identity を team id 抜きの前方一致の名前で設定した時、
 // codesign の ambiguous の message に `<名前> (XXXXXXXXXX)` の形で候補の team id が並ぶ。
 const TEAM_AFTER_IDENTITY_RE = /<identity>(\s*)\([A-Z0-9]{10}\)/g;
+// codesign の ambiguous の行: 候補が `"<名前> (XXXXXXXXXX)"` の形で引用符の中に並ぶ。identity が候補の名前より
+// 短い前方一致だと、伏せた後も `"<identity> の残りの名前 (XXXXXXXXXX)"` が残るので、引用符の中の候補の全体を伏せる。
+const AMBIGUOUS_LINE_RE = /^.*\bambiguous\b.*$/gm;
+const IDENTITY_CANDIDATE_RE = /"<identity>[^"\n]*"/g;
 
 function isSecretName(name) {
   return SECRET_NAMES.has(name) || SECRET_PREFIXES.some((p) => name.startsWith(p));
@@ -69,6 +73,7 @@ function makeRedactor(secrets) {
     let s = String(text);
     for (const [value, mark] of sorted) s = s.split(value).join(mark);
     return s
+      .replace(AMBIGUOUS_LINE_RE, (line) => line.replace(IDENTITY_CANDIDATE_RE, '"<identity-candidate>"'))
       .replace(TEAM_AFTER_IDENTITY_RE, '<identity>$1(<team-id>)')
       .replace(KEYCHAINS_DIR_RE, '<keychain>')
       .replace(KEYCHAIN_FILE_RE, '<keychain>');

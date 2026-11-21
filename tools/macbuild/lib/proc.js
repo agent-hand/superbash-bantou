@@ -51,7 +51,8 @@ const MAX_PENDING = 256 * 1024;
 
 /**
  * 起動し、stdout と stderr を行ごとに redact に通して fd（log の file）へ書く。
- * tap(raw) には伏せる前の同じ区切りの文字列を渡す（成果物の path を拾うため。file には書かない）。
+ * tap(raw, name) には伏せる前の同じ区切りの文字列と stream の名前（stdout|stderr）を渡す
+ * （成果物の path を拾うため。file には書かない）。
  * onSpawn(child) で child を渡す（signal を渡すため）。
  */
 function runToLog(cmd, args, { cwd, env, fd, redact = (s) => s, tap = () => {}, onSpawn } = {}) {
@@ -65,8 +66,11 @@ function runToLog(cmd, args, { cwd, env, fd, redact = (s) => s, tap = () => {}, 
     };
     const child = spawn(cmd, args, { cwd, env, stdio: ['ignore', 'pipe', 'pipe'] });
     if (onSpawn) onSpawn(child);
-    const drained = [child.stdout, child.stderr].map(
-      (stream) =>
+    const drained = [
+      ['stdout', child.stdout],
+      ['stderr', child.stderr],
+    ].map(
+      ([name, stream]) =>
         new Promise((res) => {
           let pending = '';
           stream.setEncoding('utf8');
@@ -75,14 +79,14 @@ function runToLog(cmd, args, { cwd, env, fd, redact = (s) => s, tap = () => {}, 
             const cut = pending.length > MAX_PENDING ? pending.length : pending.lastIndexOf('\n') + 1;
             if (cut > 0) {
               const raw = pending.slice(0, cut);
-              tap(raw);
+              tap(raw, name);
               fs.writeSync(fd, redact(raw));
               pending = pending.slice(cut);
             }
           });
           stream.on('end', () => {
             if (pending) {
-              tap(pending);
+              tap(pending, name);
               fs.writeSync(fd, redact(pending));
             }
             res();

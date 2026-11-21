@@ -42,14 +42,14 @@ const NOTARIZE_FIELDS = Object.freeze(
 const ENV_NAME_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 function defaultConfigPath(home) {
-  return path.join(home, '.config', 'superbash-macbuild', 'config.json');
+  return path.join(home, '.config', 'superbash-bantou', 'config.json');
 }
 
 function defaults(home) {
   const d = {};
   for (const key of Object.keys(FIELDS)) d[key] = null;
-  d.lockDir = path.join(home, 'Library', 'Caches', 'superbash-macbuild');
-  d.logDir = path.join(home, 'Library', 'Logs', 'superbash-macbuild');
+  d.lockDir = path.join(home, 'Library', 'Caches', 'superbash-bantou');
+  d.logDir = path.join(home, 'Library', 'Logs', 'superbash-bantou');
   return d;
 }
 

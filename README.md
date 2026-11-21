@@ -1,6 +1,6 @@
-# superbash-macbuild
+# superbash-bantou
 
-[superbash](https://github.com/unagents/superbash) の toolset。mac でしか出来ない build（Tauri）と codesign の署名を、MCP の道具 `superbash-command` の command として出す。
+[superbash](https://github.com/agent-hand/superbash) の toolset。mac でしか出来ない build（Tauri）と codesign の署名を、MCP の道具 `superbash-command` の command として出す。
 
 署名の identity・updater の鍵・その password・公証の資格は **host の設定** から読む。道具の引数にも出力にも log にも出さない。
 
@@ -60,10 +60,10 @@ Tauri の build は数分から十数分かかる。superbash の既定の時間
 | `appleApiIssuerEnv` | `MACBUILD_APPLE_API_ISSUER_ENV` | その issuer を持つ環境変数の名前（`APPLE_API_ISSUER`） | 未設定 |
 | `appleApiKeyPathEnv` | `MACBUILD_APPLE_API_KEY_PATH_ENV` | API key の file の path を持つ環境変数の名前（`APPLE_API_KEY_PATH`） | 未設定 |
 | `appleProviderShortNameEnv` | `MACBUILD_APPLE_PROVIDER_SHORT_NAME_ENV` | 複数の team に属する Apple ID で公証する時の provider の short name を持つ環境変数の名前（`APPLE_PROVIDER_SHORT_NAME`） | 未設定 |
-| `lockDir` | `MACBUILD_LOCK_DIR` | build の lock を置く dir | `~/Library/Caches/superbash-macbuild` |
-| `logDir` | `MACBUILD_LOG_DIR` | build の log を置く dir | `~/Library/Logs/superbash-macbuild` |
+| `lockDir` | `MACBUILD_LOCK_DIR` | build の lock を置く dir | `~/Library/Caches/superbash-bantou` |
+| `logDir` | `MACBUILD_LOG_DIR` | build の log を置く dir | `~/Library/Logs/superbash-bantou` |
 
-- 設定の file: 既定は `~/.config/superbash-macbuild/config.json`。`MACBUILD_CONFIG` で別の path を指せる（指した file が無ければ誤り。既定の file は無くてよい）。
+- 設定の file: 既定は `~/.config/superbash-bantou/config.json`。`MACBUILD_CONFIG` で別の path を指せる（指した file が無ければ誤り。既定の file は無くてよい）。
 - file の path の値は `~/` で始めてよい。相対 path は設定の file の dir から解く（環境変数の相対 path は cwd から）。
 - 未知の key は無視し、stderr に警告を出して続ける（`macbuild-info` の `config.warnings` にも出る）。文字列でない値・環境変数の名前でない値・JSON でない file は誤り（終了 code 4）。
 - この repo には値を入れない。host ごとに置く。
@@ -87,7 +87,7 @@ Tauri の build は数分から十数分かかる。superbash の既定の時間
 - 親の環境の生の `APPLE_*`（`APPLE_SIGNING_IDENTITY`・`APPLE_CERTIFICATE*`・公証の `APPLE_ID`・`APPLE_PASSWORD`・`APPLE_TEAM_ID`・`APPLE_API_*` など）と `TAURI_SIGNING_*`（と Tauri v1 の `TAURI_PRIVATE_KEY`・`TAURI_KEY_PASSWORD`）は、**どの子 process にも渡さない**（Tauri の CLI・codesign・`macbuild-info` の版の照会）。設定が名前で指す元の変数（password・公証の資格）も渡さない。署名の扱いは host の設定だけで決め、証明書の keychain への import はさせない。
 - 公証: identity の時だけ、`apple*Env` で名前を指した環境変数の値を、Tauri の期待する名前（`APPLE_ID`・`APPLE_PASSWORD`・`APPLE_TEAM_ID`・`APPLE_API_KEY`・`APPLE_API_ISSUER`・`APPLE_API_KEY_PATH`・`APPLE_PROVIDER_SHORT_NAME`）で Tauri に渡す。指した変数が無ければ終了 code 4。ad-hoc の時は公証しない（渡さず、変数が無くても誤りにしない）。
 - updater の鍵は **path を** `TAURI_SIGNING_PRIVATE_KEY` に渡すだけ。macbuild は鍵の中身を読まない・写さない・出力しない（file が有るかだけ見る）。password は `updaterKeyPasswordEnv` の名前の環境変数から引いて `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` に入れる（鍵の path が無い時は password も渡さない）。
-- 伏せ: build の出力は行ごとに、log の file に書く前に伏せる（stderr に写す log の末尾も同じ）。`macbuild-sign` の codesign の失敗の message、成果物の `verifyError` も伏せる。伏せる物は identity の文字列（`-` を除く）と、その末尾の `(XXXXXXXXXX)` の team id、伏せた identity の直後の `(XXXXXXXXXX)`（identity を team id 抜きの前方一致の名前で設定した時、codesign の ambiguous の message に並ぶ候補の team id）、updater の鍵の path、設定が名前で指す変数の値（4 文字以上）、keychain の path（`…/Keychains/…`・`*.keychain`・`*.keychain-db`）。`<identity>`・`<team-id>`・`<updater-key>`・`<secret>`・`<keychain>` に置き換わる。成果物の path は伏せる前の出力から拾う（秘密の値が path の一部と一致しても path は壊れない。log の中の path は伏せる）。
+- 伏せ: build の出力は行ごとに、log の file に書く前に伏せる（stderr に写す log の末尾も同じ）。`macbuild-sign` の codesign の失敗の message、成果物の `verifyError` も伏せる。伏せる物は identity の文字列（`-` を除く）と、その末尾の `(XXXXXXXXXX)` の team id、伏せた identity の直後の `(XXXXXXXXXX)`、codesign の ambiguous の行で `"<identity>…"` と引用符の中に並ぶ候補の全体（identity を team id 抜きや短い前方一致の名前で設定した時に出る、候補の名前の残りと team id。`<identity-candidate>` になる）、updater の鍵の path、設定が名前で指す変数の値（4 文字以上）、keychain の path（`…/Keychains/…`・`*.keychain`・`*.keychain-db`）。`<identity>`・`<team-id>`・`<updater-key>`・`<secret>`・`<keychain>` に置き換わる。成果物の path は伏せる前の出力から、流しながら拾う（秘密の値が path の一部と一致しても path は壊れない。log の中の path は伏せる。出力の全体は memory に溜めず、「Finished … at:」の後の path の行だけを持つ）。
 - `macbuild-info` は署名の設定の有無だけを出す（値は出さない）。
 - `macbuild-sign` は元の署名の entitlements・flag（hardened runtime など）・runtime の版を引き継ぐ（`--preserve-metadata=entitlements,flags,runtime`。`entitlements` を渡せばそちらが優先）。hardened runtime を無条件には付けない。identity の時は `--timestamp` を付け、`noTimestamp: true`（`--no-timestamp`）なら `--timestamp=none`（offline の署名用。ad-hoc は元から timestamp を付けない）。bundle の中の入れ子の code（frameworks・sidecar）は署名し直さない（外側だけ）。
 
@@ -101,7 +101,7 @@ Tauri の build は数分から十数分かかる。superbash の既定の時間
 
 ## MCP の設定（host の側）
 
-superbash の MCP の設定の 1 件として書く。toolset は package の名前@版・git の repo・手元の dir のどれでも npm に渡せる物（値は架空）:
+superbash の MCP の設定の 1 件として書く。toolset は npm に渡せる物なら何でもよい: GitHub の repo（`github:agent-hand/superbash-bantou`。既定の branch）・package の名前@版・手元の dir（env の値は架空）:
 
 ```json
 {
@@ -109,7 +109,7 @@ superbash の MCP の設定の 1 件として書く。toolset は package の名
     "macbuild": {
       "type": "stdio",
       "command": "npx",
-      "args": ["-y", "--package=superbash@0.1.0", "--", "superbash", "superbash-macbuild@0.1.1"],
+      "args": ["-y", "--package=superbash@0.1.0", "--", "superbash", "github:agent-hand/superbash-bantou"],
       "env": {
         "MACBUILD_CONFIG": "/path/to/macbuild-config.json",
         "EXAMPLE_UPDATER_KEY_PASSWORD": "<password の置き場から入れる>",

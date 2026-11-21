@@ -15,15 +15,16 @@ const manifest = JSON.parse(fs.readFileSync(MANIFEST, 'utf8'));
 const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
 
 test('package.json は toolset の形（bin を並べない・files は .manifest/ と tools/）', () => {
-  assert.equal(pkg.name, 'superbash-macbuild');
-  assert.equal(pkg.version, '0.1.1');
+  assert.equal(pkg.name, 'superbash-bantou');
+  assert.equal(pkg.version, '0.1.0');
   assert.equal(pkg.license, 'MIT');
+  assert.equal(pkg.repository.url, 'git+https://github.com/agent-hand/superbash-bantou.git');
   assert.deepEqual(pkg.files, ['.manifest/', 'tools/']);
   assert.equal(pkg.bin, undefined);
 });
 
 test('toolconfig.json の tools と commands の形', () => {
-  assert.equal(manifest.name, 'superbash-macbuild');
+  assert.equal(manifest.name, 'superbash-bantou');
   assert.deepEqual(Object.keys(manifest.tools), ['macbuild']);
   const entry = path.join(ROOT, 'tools', 'macbuild', manifest.tools.macbuild.entry);
   assert.ok(fs.statSync(entry).isFile(), 'entry が無い');

@@ -1,8 +1,12 @@
 {
-  "name": "superbash-macbuild",
-  "version": "0.1.1",
+  "name": "superbash-bantou",
+  "version": "0.1.0",
   "description": "superbash の toolset: mac でしか出来ない build（Tauri）と codesign の署名の窓口",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/agent-hand/superbash-bantou.git"
+  },
   "files": [
     ".manifest/",
     "tools/"
