@@ -46,11 +46,14 @@ function runSync(cmd, args, { cwd, env, timeout = 60_000 } = {}) {
   };
 }
 
+// 行の途中で切らずに伏せるため、改行まで溜める。改行の無い長い出力はこの長さで書き出す。
+const MAX_PENDING = 256 * 1024;
+
 /**
- * 起動し、stdout と stderr を fd（log の file）へ直に書かせる。
+ * 起動し、stdout と stderr を行ごとに redact に通して fd（log の file）へ書く。
  * onSpawn(child) で child を渡す（signal を渡すため）。
  */
-function runToFd(cmd, args, { cwd, env, fd, onSpawn } = {}) {
+function runToLog(cmd, args, { cwd, env, fd, redact = (s) => s, onSpawn } = {}) {
   return new Promise((resolve) => {
     let done = false;
     const finish = (r) => {
@@ -59,10 +62,32 @@ function runToFd(cmd, args, { cwd, env, fd, onSpawn } = {}) {
         resolve(r);
       }
     };
-    const child = spawn(cmd, args, { cwd, env, stdio: ['ignore', fd, fd] });
+    const child = spawn(cmd, args, { cwd, env, stdio: ['ignore', 'pipe', 'pipe'] });
     if (onSpawn) onSpawn(child);
+    const drained = [child.stdout, child.stderr].map(
+      (stream) =>
+        new Promise((res) => {
+          let pending = '';
+          stream.setEncoding('utf8');
+          stream.on('data', (chunk) => {
+            pending += chunk;
+            const cut = pending.length > MAX_PENDING ? pending.length : pending.lastIndexOf('\n') + 1;
+            if (cut > 0) {
+              fs.writeSync(fd, redact(pending.slice(0, cut)));
+              pending = pending.slice(cut);
+            }
+          });
+          stream.on('end', () => {
+            if (pending) fs.writeSync(fd, redact(pending));
+            res();
+          });
+          stream.on('error', res);
+        }),
+    );
     child.on('error', (error) => finish({ status: null, signal: null, error }));
-    child.on('close', (status, signal) => finish({ status, signal, error: null }));
+    child.on('close', (status, signal) => {
+      Promise.all(drained).then(() => finish({ status, signal, error: null }));
+    });
   });
 }
 
@@ -74,4 +99,4 @@ function firstLine(text) {
   return line ? line.slice(0, 300) : null;
 }
 
-module.exports = { which, runSync, runToFd, firstLine, isExecutableFile };
+module.exports = { which, runSync, runToLog, firstLine, isExecutableFile };

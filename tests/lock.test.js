@@ -1,8 +1,9 @@
 'use strict';
-// 排他の振る舞い: 同時 1 本、取れない時は待たずに終わる（終了 code 3）、居ない持ち主の lock は外して取る。
+// 排他の振る舞い: 同時 1 本、取れない時は待たずに終わる（終了 code 3）、
+// 持ち主が SIGKILL で終わっても kernel が lock を外す（古い lock を外す処理が無い）。
 
 const assert = require('node:assert/strict');
-const { spawn, spawnSync } = require('node:child_process');
+const { spawn } = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');
 const readline = require('node:readline');
@@ -11,6 +12,8 @@ const test = require('node:test');
 const lock = require('../tools/macbuild/lib/lock');
 const { EXIT } = require('../tools/macbuild/lib/errors');
 const { makeTmp, rmTmp, cleanEnv, runCli, makeFakeProject, readRecord } = require('./helpers/env');
+
+const CHILD = path.join(__dirname, 'helpers', 'lock-child.js');
 
 async function withTmp(fn) {
   const dir = makeTmp();
@@ -21,56 +24,68 @@ async function withTmp(fn) {
   }
 }
 
-function deadPid() {
-  // 終わった子の pid（もう居ない）。
-  const r = spawnSync(process.execPath, ['-e', '0']);
-  return r.pid;
+/** lock-child を起動し、1 行目（結果）と終わりを event で受ける。 */
+function startChild(dir) {
+  const p = spawn(process.execPath, [CHILD, dir], { stdio: ['pipe', 'pipe', 'inherit'] });
+  const closed = new Promise((resolve) => p.once('close', (code, signal) => resolve({ code, signal })));
+  const first = new Promise((resolve, reject) => {
+    const rl = readline.createInterface({ input: p.stdout });
+    rl.once('line', (line) => {
+      rl.close();
+      resolve(JSON.parse(line));
+    });
+    p.once('error', reject);
+  });
+  return { p, first, closed };
 }
 
-test('取る・持っている間は取れない・外すと取れる', () =>
+test('取る・持っている間は取れない（同じ process でも）・外すと取れる', () =>
   withTmp((dir) => {
     const a = lock.acquire(dir, { project: '/p/a' });
     assert.equal(a.acquired, true);
-    assert.equal(lock.inspect(dir).held, true);
-    assert.equal(lock.inspect(dir).stale, false);
+    assert.deepEqual(lock.inspect(dir), {
+      path: path.join(dir, lock.LOCK_NAME),
+      held: true,
+      pid: process.pid,
+      startedAt: a.owner.startedAt,
+      project: '/p/a',
+    });
 
     const b = lock.acquire(dir, { project: '/p/b' });
     assert.equal(b.acquired, false);
     assert.deepEqual(lock.publicOwner(b.owner), { pid: process.pid, startedAt: a.owner.startedAt, project: '/p/a' });
-    assert.equal('token' in lock.publicOwner(b.owner), false, 'token は出さない');
 
-    assert.equal(lock.release(a.path, 'not-my-token'), false, '他人の token では外さない');
-    assert.equal(lock.inspect(dir).held, true);
     a.release();
     a.release(); // 2 度目は何もしない
     assert.equal(lock.inspect(dir).held, false);
+    assert.equal(fs.readFileSync(a.path, 'utf8'), '', '外す時に持ち主の情報を消す');
 
     const c = lock.acquire(dir);
     assert.equal(c.acquired, true);
     c.release();
-    assert.deepEqual(fs.readdirSync(dir), [], '一時の dir を残さない');
+    assert.deepEqual(fs.readdirSync(dir), [lock.LOCK_NAME], 'lock の file 1 つだけ（消さない・一時の物を残さない）');
   }));
 
-test('持ち主の process が居ない lock は外して取り直す', () =>
-  withTmp((dir) => {
-    const lockPath = path.join(dir, lock.LOCK_NAME);
-    fs.mkdirSync(lockPath);
-    fs.writeFileSync(
-      path.join(lockPath, 'owner.json'),
-      JSON.stringify({ pid: deadPid(), token: 'old', startedAt: '2000-01-01T00:00:00.000Z' }),
-    );
-    assert.equal(lock.inspect(dir).stale, true);
-    const r = lock.acquire(dir);
+test('持ち主が SIGKILL で終わると、kernel が lock を外す（中身が残っても取れる）', () =>
+  withTmp(async (dir) => {
+    const holder = startChild(dir);
+    assert.equal((await holder.first).acquired, true);
+    assert.equal(lock.acquire(dir).acquired, false, '持っている間は取れない');
+    holder.p.kill('SIGKILL');
+    assert.equal((await holder.closed).signal, 'SIGKILL');
+
+    assert.notEqual(fs.readFileSync(path.join(dir, lock.LOCK_NAME), 'utf8'), '', '中身は残っている');
+    assert.equal(lock.inspect(dir).held, false, '中身が残っていても持ち主は居ない');
+    const r = lock.acquire(dir, { project: '/p/next' });
     assert.equal(r.acquired, true);
     assert.equal(lock.inspect(dir).pid, process.pid);
     r.release();
   }));
 
-test('owner.json の無い lock（壊れた物）も古い lock として外す', () =>
+test('中身の壊れた lock の file も、lock が無ければ取れる', () =>
   withTmp((dir) => {
-    const lockPath = path.join(dir, lock.LOCK_NAME);
-    fs.mkdirSync(lockPath);
-    fs.writeFileSync(path.join(lockPath, 'junk'), 'x');
+    fs.writeFileSync(path.join(dir, lock.LOCK_NAME), '{ broken');
+    assert.equal(lock.inspect(dir).held, false);
     const r = lock.acquire(dir);
     assert.equal(r.acquired, true);
     r.release();
@@ -78,33 +93,15 @@ test('owner.json の無い lock（壊れた物）も古い lock として外す'
 
 test('同時に取りに行く 6 本の process のうち、取れるのは 1 本だけ', () =>
   withTmp(async (dir) => {
-    const child = path.join(__dirname, 'helpers', 'lock-child.js');
-    const procs = Array.from({ length: 6 }, () =>
-      spawn(process.execPath, [child, dir], { stdio: ['pipe', 'pipe', 'inherit'] }),
-    );
-    // 取れなかった子はすぐ終わるので、終わりの event は起動の直後から受ける。
-    const closed = procs.map((p) => new Promise((resolve) => p.once('close', resolve)));
-    // 各 process の 1 行目（結果）を待つ（event だけで待つ）。
-    const results = await Promise.all(
-      procs.map(
-        (p) =>
-          new Promise((resolve, reject) => {
-            const rl = readline.createInterface({ input: p.stdout });
-            rl.once('line', (line) => {
-              rl.close();
-              resolve(JSON.parse(line));
-            });
-            p.once('error', reject);
-          }),
-      ),
-    );
+    const children = Array.from({ length: 6 }, () => startChild(dir));
+    const results = await Promise.all(children.map((c) => c.first));
     const winners = results.filter((r) => r.acquired);
     assert.equal(winners.length, 1, JSON.stringify(results));
     assert.equal(lock.inspect(dir).pid, winners[0].pid);
 
     // stdin を閉じて終わらせる（取れた 1 本はここで外す）。
-    for (const p of procs) p.stdin.end();
-    await Promise.all(closed);
+    for (const c of children) c.p.stdin.end();
+    await Promise.all(children.map((c) => c.closed));
     assert.equal(lock.inspect(dir).held, false);
   }));
 

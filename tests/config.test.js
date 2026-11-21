@@ -8,7 +8,7 @@ const test = require('node:test');
 
 const { loadConfig, defaultConfigPath, codesignIdentity } = require('../tools/macbuild/lib/config');
 const { EnvError, EXIT } = require('../tools/macbuild/lib/errors');
-const { makeTmp, rmTmp, cleanEnv, runCli } = require('./helpers/env');
+const { FAKE, makeTmp, rmTmp, cleanEnv, runCli } = require('./helpers/env');
 
 function withTmp(fn) {
   const dir = makeTmp();
@@ -39,9 +39,28 @@ test('何も無い時は既定（ad-hoc・lock と log は home の Library の�
       identity: 'unset',
       updaterKeyPath: 'unset',
       updaterKeyPasswordEnv: 'unset',
+      appleIdEnv: 'unset',
+      applePasswordEnv: 'unset',
+      appleTeamIdEnv: 'unset',
+      appleApiKeyEnv: 'unset',
+      appleApiIssuerEnv: 'unset',
+      appleApiKeyPathEnv: 'unset',
       lockDir: 'default',
       logDir: 'default',
     });
+    assert.deepEqual(c.warnings, []);
+  }));
+
+test('公証の資格は「値を持つ環境変数の名前」だけを持つ（file と MACBUILD_APPLE_*_ENV）', () =>
+  withTmp((home) => {
+    writeJson(defaultConfigPath(home), { appleIdEnv: 'EXAMPLE_APPLE_ID', applePasswordEnv: 'EXAMPLE_APPLE_PW' });
+    const c = loadConfig({ env: { MACBUILD_APPLE_TEAM_ID_ENV: 'EXAMPLE_TEAM' }, home, cwd: home });
+    assert.equal(c.appleIdEnv, 'EXAMPLE_APPLE_ID');
+    assert.equal(c.applePasswordEnv, 'EXAMPLE_APPLE_PW');
+    assert.equal(c.appleTeamIdEnv, 'EXAMPLE_TEAM');
+    assert.deepEqual([c.sources.appleIdEnv, c.sources.appleTeamIdEnv, c.sources.appleApiKeyEnv], ['file', 'env', 'unset']);
+    writeJson(defaultConfigPath(home), { appleIdEnv: 'not a name' });
+    assert.throws(() => loadConfig({ env: {}, home, cwd: home }), EnvError);
   }));
 
 test('既定の場所の設定の file を読む（~ と相対 path は file の dir から解く）', () =>
@@ -106,13 +125,26 @@ test('MACBUILD_CONFIG で別の file を指す（既定の file は読まない�
     );
   }));
 
-test('設定の file の誤りは EnvError（終了 code 4）', () =>
+test('設定の file の未知の key は誤りにせず、警告にして続ける', () =>
+  withTmp((home) => {
+    writeJson(defaultConfigPath(home), { identiy: 'typo', lockDir: '/x/lock', futureKey: 1 });
+    const c = loadConfig({ env: {}, home, cwd: home });
+    assert.equal(c.lockDir, '/x/lock');
+    assert.equal(c.signingMode, 'adhoc');
+    assert.deepEqual(c.warnings, ['設定の file の未知の key を無視する: identiy', '設定の file の未知の key を無視する: futureKey']);
+
+    const r = runCli(['info'], { env: cleanEnv(home) });
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stderr, /警告: 設定の file の未知の key を無視する: identiy/);
+    assert.deepEqual(r.json.config.warnings, c.warnings);
+  }));
+
+test('設定の file の誤り（読めない値）は EnvError（終了 code 4）', () =>
   withTmp((home) => {
     const file = defaultConfigPath(home);
     const bad = [
       '{ not json',
       '[]',
-      { identiy: 'typo' },
       { identity: 42 },
       { updaterKeyPasswordEnv: 'not a name' },
     ];
@@ -128,20 +160,26 @@ test('設定の file の誤りは EnvError（終了 code 4）', () =>
     );
   }));
 
-test('info は署名の設定の有無だけを出し、値（identity・鍵の path・password）は出さない', () =>
+test('info は署名の設定の有無だけを出し、値（identity・鍵の path・password・公証の資格）は出さない', () =>
   withTmp((home) => {
     const keyPath = path.join(home, 'keys', 'example-updater.key');
     writeJson(keyPath, 'not a real key');
-    writeJson(defaultConfigPath(home), { updaterKeyPath: keyPath, updaterKeyPasswordEnv: 'EXAMPLE_UPDATER_PW' });
+    writeJson(defaultConfigPath(home), {
+      updaterKeyPath: keyPath,
+      updaterKeyPasswordEnv: 'EXAMPLE_UPDATER_PW',
+      appleIdEnv: 'EXAMPLE_APPLE_ID',
+      applePasswordEnv: 'EXAMPLE_APPLE_PW',
+    });
     const env = cleanEnv(home, {
-      MACBUILD_IDENTITY: 'Example Secret Identity',
+      MACBUILD_IDENTITY: FAKE.identity,
       MACBUILD_LOCK_DIR: path.join(home, 'lock'),
-      EXAMPLE_UPDATER_PW: 'example-password-value',
+      EXAMPLE_UPDATER_PW: FAKE.updaterPassword,
+      EXAMPLE_APPLE_ID: FAKE.appleId,
     });
     const r = runCli(['info'], { env });
     assert.equal(r.status, 0, r.stderr);
-    for (const secret of ['Example Secret Identity', 'example-updater.key', 'example-password-value', 'EXAMPLE_UPDATER_PW']) {
-      assert.equal(r.stdout.includes(secret), false, `info の出力に ${secret}`);
+    for (const secret of [FAKE.identity, FAKE.teamId, 'example-updater.key', FAKE.updaterPassword, FAKE.appleId, 'EXAMPLE_UPDATER_PW', 'EXAMPLE_APPLE_ID']) {
+      assert.equal((r.stdout + r.stderr).includes(secret), false, `info の出力に ${secret}`);
     }
     assert.deepEqual(r.json.signing, {
       mode: 'identity',
@@ -150,6 +188,8 @@ test('info は署名の設定の有無だけを出し、値（identity・鍵の 
       updaterKeyFound: true,
       updaterKeyPassword: true,
       updaterKeyPasswordSet: true,
+      notarize: true,
+      notarizeSet: false,
     });
     assert.equal(r.json.config.found, true);
     assert.equal(r.json.config.sources.identity, 'env');
@@ -168,4 +208,6 @@ test('info は設定の誤りの時も道具の有無を出し、終了 code 4',
     assert.equal(r.status, EXIT.ENV);
     assert.match(r.json.config.error, /JSON でない/);
     assert.equal(typeof r.json.tools.codesign.available, 'boolean');
+    assert.equal(r.json.signing, null);
+    assert.deepEqual(Object.keys(r.json).sort(), ['config', 'developerDir', 'host', 'signing', 'tools'], 'spec の out の形');
   }));

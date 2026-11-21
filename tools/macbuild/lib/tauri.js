@@ -2,40 +2,25 @@
 // macbuild tauri: Tauri の build と署名（identity が無ければ ad-hoc）。
 //
 // - Tauri の CLI は project から上へ node_modules/.bin/tauri を探し、無ければ `cargo tauri`（cargo-tauri が PATH にある時）。
+//   conf（tauri.conf.*）の場所の探し方は Tauri の CLI に任せる。
 // - 署名は Tauri の bundler に任せる（APPLE_SIGNING_IDENTITY に identity か `-` を渡す）。build の後に codesign で確かめる。
-// - updater の鍵は path を TAURI_SIGNING_PRIVATE_KEY に渡すだけ（中身は読まない）。password は設定の環境変数名から引く。
-// - build の出力は log の file に直に書かせる。stderr には進捗だけ、失敗の時は log の末尾を出す。
+// - 子の環境: 親の APPLE_*・TAURI_SIGNING_* と、設定が名前で指す元の変数は渡さない（secrets.scrubEnv）。
+//   updater の鍵は path を TAURI_SIGNING_PRIVATE_KEY に、password は設定の環境変数名の値を TAURI_SIGNING_PRIVATE_KEY_PASSWORD に入れる。
+//   identity の時だけ、公証の資格を設定の環境変数名の値から Tauri の名前（APPLE_ID など）で入れる。
+// - build の出力は行ごとに秘密を伏せて log の file に書く。stderr には進捗だけ、失敗の時は（伏せた）log の末尾を出す。
 
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
 const codesign = require('./codesign');
-const { loadConfig, codesignIdentity } = require('./config');
+const { loadConfig, reportWarnings, codesignIdentity, NOTARIZE_FIELDS } = require('./config');
 const { EXIT, UsageError, EnvError } = require('./errors');
 const lock = require('./lock');
-const { which, runToFd, isExecutableFile } = require('./proc');
-
-const CONF_FILES = ['tauri.conf.json', 'tauri.conf.json5', 'Tauri.toml'];
-
-// 子の環境から外す物（署名の扱いは host の設定だけで決める。証明書の import はさせない）。
-const STRIP_ALWAYS = [
-  'APPLE_SIGNING_IDENTITY',
-  'APPLE_CERTIFICATE',
-  'APPLE_CERTIFICATE_PASSWORD',
-  'TAURI_SIGNING_PRIVATE_KEY',
-  'TAURI_SIGNING_PRIVATE_KEY_PATH',
-  'TAURI_SIGNING_PRIVATE_KEY_PASSWORD',
-];
-// ad-hoc の時は公証（notarization）の資格も外す（ad-hoc は公証できない）。
-const STRIP_ADHOC = ['APPLE_ID', 'APPLE_PASSWORD', 'APPLE_TEAM_ID', 'APPLE_API_KEY', 'APPLE_API_ISSUER', 'APPLE_API_KEY_PATH'];
+const { which, runToLog, isExecutableFile } = require('./proc');
+const { scrubEnv, secretsOf, makeRedactor } = require('./secrets');
 
 const LOG_TAIL_LINES = 40;
-
-function findTauriProject(project) {
-  const srcTauri = path.join(project, 'src-tauri');
-  return CONF_FILES.some((f) => fs.existsSync(path.join(srcTauri, f)));
-}
 
 /** Tauri の CLI を決める: { cmd, args, label } か null。 */
 function findTauriCli(project, env = process.env) {
@@ -60,21 +45,25 @@ function tauriArgs({ target, bundles, debug } = {}) {
   return args;
 }
 
-/** 子の環境。署名と updater の鍵は host の設定から入れる。 */
+function namedValue(baseEnv, name, what) {
+  const v = baseEnv[name];
+  if (typeof v !== 'string') throw new EnvError(`${what}の環境変数が無い: ${name}`);
+  return v;
+}
+
+/** 子の環境。署名・updater の鍵・公証の資格は host の設定からだけ入れる。 */
 function tauriEnv(config, { baseEnv = process.env, targetDir } = {}) {
-  const env = { ...baseEnv };
-  for (const k of STRIP_ALWAYS) delete env[k];
-  if (config.signingMode === 'adhoc') for (const k of STRIP_ADHOC) delete env[k];
+  const env = scrubEnv(baseEnv, config);
   env.APPLE_SIGNING_IDENTITY = codesignIdentity(config);
   if (config.updaterKeyPath) {
     env.TAURI_SIGNING_PRIVATE_KEY = config.updaterKeyPath;
     if (config.updaterKeyPasswordEnv) {
-      const pw = baseEnv[config.updaterKeyPasswordEnv];
-      if (typeof pw !== 'string') {
-        throw new EnvError(`updater の鍵の password の環境変数が無い: ${config.updaterKeyPasswordEnv}`);
-      }
-      env.TAURI_SIGNING_PRIVATE_KEY_PASSWORD = pw;
-      delete env[config.updaterKeyPasswordEnv];
+      env.TAURI_SIGNING_PRIVATE_KEY_PASSWORD = namedValue(baseEnv, config.updaterKeyPasswordEnv, 'updater の鍵の password ');
+    }
+  }
+  if (config.signingMode === 'identity') {
+    for (const [key, passAs] of NOTARIZE_FIELDS) {
+      if (config[key]) env[passAs] = namedValue(baseEnv, config[key], '公証の資格（' + passAs + '）');
     }
   }
   if (targetDir) env.CARGO_TARGET_DIR = targetDir;
@@ -157,11 +146,11 @@ async function build(values, { stderr = process.stderr, env = process.env, cwd =
   if (!fs.existsSync(project) || !fs.statSync(project).isDirectory()) {
     throw new UsageError(`project の dir が無い: ${project}`);
   }
-  if (!findTauriProject(project)) {
-    throw new UsageError(`Tauri の project でない（src-tauri/${CONF_FILES.join('|')} が無い）: ${project}`);
-  }
 
   const config = loadConfig({ env, cwd });
+  reportWarnings(config, stderr);
+  const redact = makeRedactor(secretsOf(config, env));
+  const toolEnv = scrubEnv(env, config);
   if (!which('codesign', env)) throw new EnvError('codesign が無い');
   if (!which('cargo', env)) throw new EnvError('cargo が無い（Rust の toolchain が要る）');
   const cli = findTauriCli(project, env);
@@ -222,20 +211,23 @@ async function build(values, { stderr = process.stderr, env = process.env, cwd =
     try {
       fs.writeSync(
         fd,
-        [
-          `# macbuild tauri ${new Date(started).toISOString()}`,
-          `# project: ${project}`,
-          `# cli: ${cli.label} ${[...cli.args, ...args].join(' ')}`,
-          `# signing: ${config.signingMode}${config.updaterKeyPath ? ' (updater key: set)' : ''}`,
-          `# target dir: ${targetDir || '(cargo の既定)'}`,
-          '',
-        ].join('\n') + '\n',
+        redact(
+          [
+            `# macbuild tauri ${new Date(started).toISOString()}`,
+            `# project: ${project}`,
+            `# cli: ${cli.label} ${[...cli.args, ...args].join(' ')}`,
+            `# signing: ${config.signingMode}${config.updaterKeyPath ? ' (updater key: set)' : ''}`,
+            `# target dir: ${targetDir || '(cargo の既定)'}`,
+            '',
+          ].join('\n') + '\n',
+        ),
       );
       say(`build を始めた: log ${logPath}`);
-      const r = await runToFd(cli.cmd, [...cli.args, ...args], {
+      const r = await runToLog(cli.cmd, [...cli.args, ...args], {
         cwd: project,
         env: childEnv,
         fd,
+        redact,
         onSpawn: (c) => {
           child = c;
         },
@@ -248,7 +240,7 @@ async function build(values, { stderr = process.stderr, env = process.env, cwd =
             ? `Tauri の build が signal ${r.signal} で止まった`
             : `Tauri の build が失敗した（終了 code ${r.status}）`;
         say(why);
-        const tail = readTail(logPath);
+        const tail = redact(readTail(logPath));
         if (tail) stderr.write(`--- log の末尾（${logPath}）---\n${tail}\n--- ここまで ---\n`);
         return {
           exitCode: EXIT.FAIL,
@@ -267,11 +259,11 @@ async function build(values, { stderr = process.stderr, env = process.env, cwd =
     const artifacts = paths.map((p) => {
       const a = { kind: artifactKind(p), path: p };
       if (a.kind === 'app' || a.kind === 'dmg') {
-        a.signature = codesign.describe(p);
+        a.signature = codesign.describe(p, { env: toolEnv });
         if (a.signature.kind !== 'unsigned') {
-          const v = codesign.verify(p);
+          const v = codesign.verify(p, { env: toolEnv });
           a.verified = v.ok;
-          if (!v.ok) a.verifyError = v.message;
+          if (!v.ok) a.verifyError = redact(v.message);
         } else {
           a.verified = false;
         }
@@ -315,6 +307,4 @@ module.exports = {
   findTauriCli,
   parseFinishedPaths,
   artifactKind,
-  STRIP_ALWAYS,
-  STRIP_ADHOC,
 };

@@ -10,7 +10,7 @@ const { parse } = require('../tools/macbuild/lib/commands');
 const { UsageError, EnvError, EXIT } = require('../tools/macbuild/lib/errors');
 const tauri = require('../tools/macbuild/lib/tauri');
 const { buildArgv } = require('./helpers/spec-in');
-const { MANIFEST, makeTmp, rmTmp, cleanEnv, runCli } = require('./helpers/env');
+const { MANIFEST, FAKE, makeTmp, rmTmp, cleanEnv, runCli } = require('./helpers/env');
 
 const manifest = JSON.parse(fs.readFileSync(MANIFEST, 'utf8'));
 const spec = (name) => manifest.commands.find((c) => c.name === name).spec;
@@ -30,10 +30,11 @@ test('spec.in の規則で組んだ argv', () => {
   );
   assert.deepEqual(buildArgv(spec('macbuild-tauri'), { project: 'app', debug: false }), ['tauri', 'app']);
   assert.deepEqual(buildArgv(spec('macbuild-sign'), { path: 'X.app' }), ['sign', 'X.app']);
-  assert.deepEqual(buildArgv(spec('macbuild-sign'), { path: 'X.app', entitlements: 'e.plist' }), [
+  assert.deepEqual(buildArgv(spec('macbuild-sign'), { path: 'X.app', noTimestamp: true, entitlements: 'e.plist' }), [
     'sign',
     '--entitlements',
     'e.plist',
+    '--no-timestamp',
     'X.app',
   ]);
 });
@@ -45,6 +46,7 @@ test('組んだ argv を CLI が同じ値に読み戻す', () => {
     ['macbuild-tauri', { project: 'app', target: 'x86_64-apple-darwin', bundles: 'dmg', debug: true, targetDir: '/t/x' }],
     ['macbuild-tauri', { project: 'a b;$(id)`id`*', target: '--debug' }],
     ['macbuild-sign', { path: "it's \"quoted\" & spaced.app", entitlements: 'e.plist' }],
+    ['macbuild-sign', { path: 'X.app', noTimestamp: true }],
   ];
   for (const [name, args] of cases) {
     const s = spec(name);
@@ -83,9 +85,11 @@ test('使い方の誤りは UsageError（終了 code 2）', () => {
   }
 });
 
-test('`--` の後と最初の positional の後は positional', () => {
-  assert.deepEqual(parse(['sign', '--', '--entitlements']).values, { path: '--entitlements' });
+test('`--` の後と最初の positional の後は positional（`-` で始まる positional は既知の制限）', () => {
+  assert.deepEqual(parse(['sign', '--', '--entitlements']).values, { path: '--entitlements', noTimestamp: false });
   assert.deepEqual(parse(['tauri', '--', '-app']).values, { project: '-app', debug: false });
+  // superbash は `--` を入れないので、`-` で始まる positional は option と読まれて誤りになる（README の既知の制限）。
+  assert.throws(() => parse(buildArgv(spec('macbuild-tauri'), { project: '-app' })), UsageError);
 });
 
 test('Tauri の CLI に渡す argv', () => {
@@ -101,63 +105,110 @@ test('Tauri の CLI に渡す argv', () => {
   ]);
 });
 
-test('codesign の argv（ad-hoc と identity）', () => {
+test('codesign の argv: flag は元の署名から引き継ぎ、identity には timestamp（外せる）', () => {
   const preserve = '--preserve-metadata=entitlements,flags,runtime';
   assert.deepEqual(codesign.signArgs('/x/A.app', {}), ['--force', '--sign', '-', preserve, '/x/A.app']);
-  assert.deepEqual(codesign.signArgs('/x/A.app', { identity: 'Example Identity', entitlements: '/x/e.plist' }), [
+  assert.deepEqual(codesign.signArgs('/x/A.app', { noTimestamp: true }), ['--force', '--sign', '-', preserve, '/x/A.app']);
+  assert.deepEqual(codesign.signArgs('/x/A.app', { identity: FAKE.identity, entitlements: '/x/e.plist' }), [
     '--force',
     '--sign',
-    'Example Identity',
+    FAKE.identity,
     preserve,
-    '--options',
-    'runtime',
     '--timestamp',
     '--entitlements',
     '/x/e.plist',
     '/x/A.app',
   ]);
+  const offline = codesign.signArgs('/x/A.app', { identity: FAKE.identity, noTimestamp: true });
+  assert.deepEqual(offline, ['--force', '--sign', FAKE.identity, preserve, '--timestamp=none', '/x/A.app']);
+  for (const args of [codesign.signArgs('/x/A.app', { identity: FAKE.identity }), offline]) {
+    assert.equal(args.includes('--options'), false, 'hardened runtime を無条件に付けない');
+  }
 });
 
-test('Tauri の子の環境: 署名の変数は host の設定だけから入れる', () => {
-  const base = {
-    PATH: '/usr/bin',
-    APPLE_SIGNING_IDENTITY: 'from-parent',
-    APPLE_CERTIFICATE: 'cert-from-parent',
-    APPLE_CERTIFICATE_PASSWORD: 'pw-from-parent',
-    TAURI_SIGNING_PRIVATE_KEY: 'key-from-parent',
-    APPLE_ID: 'someone@example.com',
-    EXAMPLE_PW: 'example-password',
-  };
-  const adhoc = tauri.tauriEnv({ signingMode: 'adhoc', identity: null }, { baseEnv: base });
-  assert.equal(adhoc.APPLE_SIGNING_IDENTITY, '-');
-  for (const k of ['APPLE_CERTIFICATE', 'APPLE_CERTIFICATE_PASSWORD', 'TAURI_SIGNING_PRIVATE_KEY', 'APPLE_ID']) {
-    assert.equal(adhoc[k], undefined, k);
-  }
-  assert.equal(adhoc.CARGO_TARGET_DIR, undefined);
+// 親の環境: 生の署名・公証・updater の変数（偽の値）と、設定が名前で指す変数。
+const PARENT = Object.freeze({
+  PATH: '/usr/bin',
+  APPLE_SIGNING_IDENTITY: 'from-parent',
+  APPLE_CERTIFICATE: 'cert-from-parent',
+  APPLE_CERTIFICATE_PASSWORD: 'pw-from-parent',
+  APPLE_ID: FAKE.parentAppleId,
+  APPLE_PASSWORD: FAKE.parentApplePassword,
+  APPLE_TEAM_ID: 'PARENTTEAM',
+  APPLE_API_KEY: 'parent-api-key',
+  APPLE_API_ISSUER: 'parent-issuer',
+  APPLE_API_KEY_PATH: '/parent/AuthKey.p8',
+  APPLE_PROVIDER_SHORT_NAME: 'parent-provider',
+  TAURI_SIGNING_PRIVATE_KEY: 'key-from-parent',
+  TAURI_SIGNING_PRIVATE_KEY_PASSWORD: 'key-pw-from-parent',
+  TAURI_PRIVATE_KEY: 'v1-key-from-parent',
+  EXAMPLE_UPDATER_PW: FAKE.updaterPassword,
+  EXAMPLE_APPLE_ID: FAKE.appleId,
+  EXAMPLE_APPLE_PW: FAKE.applePassword,
+  EXAMPLE_TEAM: FAKE.appleTeamId,
+  KEEP_ME: 'ordinary',
+});
 
-  const withId = tauri.tauriEnv(
-    {
-      signingMode: 'identity',
-      identity: 'Example Identity',
-      updaterKeyPath: '/keys/example.key',
-      updaterKeyPasswordEnv: 'EXAMPLE_PW',
-    },
-    { baseEnv: base, targetDir: '/t/target' },
+const appleKeys = (env) => Object.keys(env).filter((k) => k.startsWith('APPLE_')).sort();
+
+test('M3: 生の APPLE_* は常に子へ渡さない（ad-hoc）', () => {
+  const env = tauri.tauriEnv({ signingMode: 'adhoc', identity: null }, { baseEnv: PARENT });
+  assert.deepEqual(appleKeys(env), ['APPLE_SIGNING_IDENTITY']);
+  assert.equal(env.APPLE_SIGNING_IDENTITY, '-');
+  for (const k of ['TAURI_SIGNING_PRIVATE_KEY', 'TAURI_SIGNING_PRIVATE_KEY_PASSWORD', 'TAURI_PRIVATE_KEY']) {
+    assert.equal(env[k], undefined, k);
+  }
+  assert.equal(env.KEEP_ME, 'ordinary');
+  assert.equal(env.CARGO_TARGET_DIR, undefined);
+});
+
+test('M3: identity の時も生の APPLE_* は渡さず、公証の資格は設定の名前の変数から Tauri の名前で渡す', () => {
+  const config = {
+    signingMode: 'identity',
+    identity: FAKE.identity,
+    appleIdEnv: 'EXAMPLE_APPLE_ID',
+    applePasswordEnv: 'EXAMPLE_APPLE_PW',
+    appleTeamIdEnv: 'EXAMPLE_TEAM',
+  };
+  const env = tauri.tauriEnv(config, { baseEnv: PARENT, targetDir: '/t/target' });
+  assert.deepEqual(appleKeys(env), ['APPLE_ID', 'APPLE_PASSWORD', 'APPLE_SIGNING_IDENTITY', 'APPLE_TEAM_ID']);
+  assert.equal(env.APPLE_SIGNING_IDENTITY, FAKE.identity);
+  assert.equal(env.APPLE_ID, FAKE.appleId, '親の APPLE_ID でなく、設定の名前の変数の値');
+  assert.equal(env.APPLE_PASSWORD, FAKE.applePassword);
+  assert.equal(env.APPLE_TEAM_ID, FAKE.appleTeamId);
+  for (const k of ['EXAMPLE_APPLE_ID', 'EXAMPLE_APPLE_PW', 'EXAMPLE_TEAM']) assert.equal(env[k], undefined, `元の ${k} は渡さない`);
+  assert.equal(env.CARGO_TARGET_DIR, '/t/target');
+  assert.equal(PARENT.APPLE_ID, FAKE.parentAppleId, '親の環境は変えない');
+
+  assert.throws(
+    () => tauri.tauriEnv({ ...config, appleApiKeyEnv: 'MISSING_API_KEY' }, { baseEnv: PARENT }),
+    (e) => e instanceof EnvError && /MISSING_API_KEY/.test(e.message) && !e.message.includes(FAKE.identity),
   );
-  assert.equal(withId.APPLE_SIGNING_IDENTITY, 'Example Identity');
-  assert.equal(withId.APPLE_ID, 'someone@example.com', 'identity の時は公証の資格を残す');
-  assert.equal(withId.APPLE_CERTIFICATE, undefined);
-  assert.equal(withId.TAURI_SIGNING_PRIVATE_KEY, '/keys/example.key', '鍵は path のまま渡す');
-  assert.equal(withId.TAURI_SIGNING_PRIVATE_KEY_PASSWORD, 'example-password');
-  assert.equal(withId.EXAMPLE_PW, undefined, 'password の元の変数は子に渡さない');
-  assert.equal(withId.CARGO_TARGET_DIR, '/t/target');
-  assert.equal(base.EXAMPLE_PW, 'example-password', '親の環境は変えない');
+  // ad-hoc では公証しない（資格を渡さず、名前の変数が無くても誤りにしない）。
+  const adhoc = tauri.tauriEnv({ ...config, signingMode: 'adhoc', appleApiKeyEnv: 'MISSING_API_KEY' }, { baseEnv: PARENT });
+  assert.deepEqual(appleKeys(adhoc), ['APPLE_SIGNING_IDENTITY']);
+  assert.equal(adhoc.EXAMPLE_APPLE_ID, undefined);
+});
+
+test('updater の鍵は path を渡し、password は設定の名前の変数から（L1: 鍵が無くても元の変数は渡さない）', () => {
+  const withKey = tauri.tauriEnv(
+    { signingMode: 'adhoc', updaterKeyPath: '/keys/example.key', updaterKeyPasswordEnv: 'EXAMPLE_UPDATER_PW' },
+    { baseEnv: PARENT },
+  );
+  assert.equal(withKey.TAURI_SIGNING_PRIVATE_KEY, '/keys/example.key', '鍵は path のまま渡す');
+  assert.equal(withKey.TAURI_SIGNING_PRIVATE_KEY_PASSWORD, FAKE.updaterPassword);
+  assert.equal(withKey.EXAMPLE_UPDATER_PW, undefined, 'password の元の変数は子に渡さない');
+
+  const noKey = tauri.tauriEnv({ signingMode: 'adhoc', updaterKeyPasswordEnv: 'EXAMPLE_UPDATER_PW' }, { baseEnv: PARENT });
+  assert.equal(noKey.EXAMPLE_UPDATER_PW, undefined, 'L1: 鍵の path が無くても元の変数は渡さない');
+  assert.equal(noKey.TAURI_SIGNING_PRIVATE_KEY, undefined);
+  assert.equal(noKey.TAURI_SIGNING_PRIVATE_KEY_PASSWORD, undefined);
 
   assert.throws(
     () =>
       tauri.tauriEnv(
         { signingMode: 'adhoc', updaterKeyPath: '/keys/example.key', updaterKeyPasswordEnv: 'MISSING_PW' },
-        { baseEnv: base },
+        { baseEnv: PARENT },
       ),
     (e) => e instanceof EnvError && /MISSING_PW/.test(e.message),
   );
@@ -198,9 +249,9 @@ test('codesign -dv の出力から署名の種類を読む（Authority は出さ
   );
   assert.deepEqual(adhoc, { kind: 'adhoc', identifier: 'com.example.a', format: 'app bundle with Mach-O thin (arm64)', runtime: true });
   const cert = codesign.parseDescribe(
-    ['Identifier=com.example.a', 'CodeDirectory v=20500 size=1 flags=0x10000(runtime) hashes=1+3', 'Authority=Example Authority'].join('\n'),
+    ['Identifier=com.example.a', 'CodeDirectory v=20500 size=1 flags=0x10000(runtime) hashes=1+3', `Authority=${FAKE.identity}`].join('\n'),
   );
   assert.equal(cert.kind, 'certificate');
-  assert.equal(JSON.stringify(cert).includes('Example Authority'), false);
+  assert.equal(JSON.stringify(cert).includes(FAKE.identity), false);
   assert.equal(codesign.parseDescribe('/x: code object is not signed at all').kind, 'unsigned');
 });

@@ -16,7 +16,7 @@ const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'))
 
 test('package.json は toolset の形（bin を並べない・files は .manifest/ と tools/）', () => {
   assert.equal(pkg.name, 'superbash-macbuild');
-  assert.equal(pkg.version, '0.1.0');
+  assert.equal(pkg.version, '0.1.1');
   assert.equal(pkg.license, 'MIT');
   assert.deepEqual(pkg.files, ['.manifest/', 'tools/']);
   assert.equal(pkg.bin, undefined);

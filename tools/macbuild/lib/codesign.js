@@ -1,13 +1,19 @@
 'use strict';
 // codesign の署名・確かめ・署名の種類の読み取り。identity は引数の 1 要素として渡す（shell を通さない）。
+// env には、呼ぶ側が秘密の変数を外した環境（secrets.scrubEnv）を渡す。
 
 const fs = require('node:fs');
 
 const { runSync, firstLine } = require('./proc');
 
 const CODESIGN = 'codesign';
+const TIMEOUT = 10 * 60_000;
 
-// codesign の失敗の理由（「replacing existing signature」などの知らせの行は除く）。
+// 署名し直す時に元の署名から引き継ぐ物（entitlements・hardened runtime などの flag・runtime の版）。
+// requirements は引き継がない（identity が変わると designated requirement が合わなくなる）。
+const PRESERVE = '--preserve-metadata=entitlements,flags,runtime';
+
+// codesign の失敗の理由（「replacing existing signature」の知らせの行は除く）。伏せるのは呼ぶ側。
 function failure(r) {
   const lines = String(r.stderr || '')
     .split('\n')
@@ -25,22 +31,22 @@ function isDir(p) {
   }
 }
 
-// 署名し直す時に元の署名から引き継ぐ物（entitlements・hardened runtime などの flag・runtime の版）。
-// requirements は引き継がない（identity が変わると designated requirement が合わなくなる）。
-const PRESERVE = '--preserve-metadata=entitlements,flags,runtime';
-
-/** 署名の argv（codesign の後ろ）。ad-hoc は `-`、identity は hardened runtime と timestamp を付ける。 */
-function signArgs(target, { identity, entitlements } = {}) {
+/**
+ * 署名の argv（codesign の後ろ）。ad-hoc は `-`。
+ * identity の時は timestamp を付ける（noTimestamp なら `--timestamp=none`。offline の署名用）。
+ * hardened runtime などの flag は元の署名から引き継ぐ（無条件には付けない）。
+ */
+function signArgs(target, { identity, entitlements, noTimestamp } = {}) {
   const id = identity || '-';
   const args = ['--force', '--sign', id, PRESERVE];
-  if (id !== '-') args.push('--options', 'runtime', '--timestamp');
+  if (id !== '-') args.push(noTimestamp ? '--timestamp=none' : '--timestamp');
   if (entitlements) args.push('--entitlements', entitlements);
   args.push(target);
   return args;
 }
 
 function sign(target, opts = {}) {
-  const r = runSync(CODESIGN, signArgs(target, opts), { timeout: 10 * 60_000 });
+  const r = runSync(CODESIGN, signArgs(target, opts), { env: opts.env, timeout: TIMEOUT });
   return { ok: r.ok, message: r.ok ? null : failure(r) };
 }
 
@@ -51,8 +57,8 @@ function verifyArgs(target) {
   return args;
 }
 
-function verify(target) {
-  const r = runSync(CODESIGN, verifyArgs(target), { timeout: 10 * 60_000 });
+function verify(target, { env } = {}) {
+  const r = runSync(CODESIGN, verifyArgs(target), { env, timeout: TIMEOUT });
   return { ok: r.ok, message: r.ok ? null : failure(r) };
 }
 
@@ -79,10 +85,10 @@ function parseDescribe(text) {
   return out;
 }
 
-function describe(target) {
-  const r = runSync(CODESIGN, ['-dv', '--verbose=2', target], { timeout: 60_000 });
+function describe(target, { env } = {}) {
+  const r = runSync(CODESIGN, ['-dv', '--verbose=2', target], { env, timeout: 60_000 });
   // codesign -d は情報を stderr に出す。
   return parseDescribe(`${r.stderr}\n${r.stdout}`);
 }
 
-module.exports = { CODESIGN, signArgs, sign, verifyArgs, verify, parseDescribe, describe };
+module.exports = { CODESIGN, PRESERVE, signArgs, sign, verifyArgs, verify, parseDescribe, describe };

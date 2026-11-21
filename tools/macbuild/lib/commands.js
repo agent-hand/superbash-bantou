@@ -22,7 +22,10 @@ const COMMANDS = Object.freeze({
   },
   sign: {
     name: 'macbuild-sign',
-    options: [{ key: 'entitlements', flag: '--entitlements', type: 'string' }],
+    options: [
+      { key: 'entitlements', flag: '--entitlements', type: 'string' },
+      { key: 'noTimestamp', flag: '--no-timestamp', type: 'boolean' },
+    ],
     positionals: [{ name: 'path', type: 'string', optional: false }],
   },
 });

@@ -1,13 +1,15 @@
 'use strict';
 // macbuild info: この host で使える物と、署名の設定の有無（値は出さない）。
+// 版の照会の子には、署名・公証・updater の秘密の変数を外した環境を渡す。
 
 const fs = require('node:fs');
 const os = require('node:os');
 
-const { loadConfig } = require('./config');
+const { loadConfig, reportWarnings, NOTARIZE_FIELDS } = require('./config');
 const { EXIT } = require('./errors');
 const lock = require('./lock');
 const { which, runSync, firstLine } = require('./proc');
+const { scrubEnv } = require('./secrets');
 
 // 名前 → 版を聞く引数（null は版を聞かない。codesign には版の option が無い）。
 const PROBES = Object.freeze([
@@ -55,19 +57,7 @@ function fileExists(p) {
   }
 }
 
-function collect({ env = process.env } = {}) {
-  const tools = {};
-  for (const [name, args] of PROBES) tools[name] = probe(name, args, env);
-
-  const swVers = runSync('sw_vers', ['-productVersion'], { env, timeout: 10_000 });
-  const devDir = runSync('xcode-select', ['-p'], { env, timeout: 10_000 });
-
-  const report = {
-    host: { platform: process.platform, arch: process.arch, macos: swVers.ok ? swVers.stdout.trim() : null },
-    developerDir: devDir.ok ? devDir.stdout.trim() : null,
-    tools,
-  };
-
+function collect({ env = process.env, stderr = process.stderr } = {}) {
   let config = null;
   let configError = null;
   try {
@@ -75,30 +65,52 @@ function collect({ env = process.env } = {}) {
   } catch (e) {
     configError = e.message;
   }
+  if (config) reportWarnings(config, stderr);
+  const childEnv = scrubEnv(env, config);
 
-  if (config) {
-    const pwEnv = config.updaterKeyPasswordEnv;
-    report.signing = {
-      mode: config.signingMode,
-      identity: config.signingMode === 'identity',
-      updaterKey: Boolean(config.updaterKeyPath),
-      updaterKeyFound: config.updaterKeyPath ? fileExists(config.updaterKeyPath) : null,
-      updaterKeyPassword: Boolean(pwEnv),
-      updaterKeyPasswordSet: pwEnv ? typeof env[pwEnv] === 'string' : null,
-    };
-    report.config = { file: tildify(config.file.path), found: config.file.found, sources: config.sources };
-    const st = lock.inspect(config.lockDir);
-    report.lock = {
-      dir: tildify(config.lockDir),
-      held: st.held,
-      ...(st.held ? { pid: st.pid, startedAt: st.startedAt, stale: st.stale } : {}),
-    };
-    report.logDir = tildify(config.logDir);
-  } else {
+  const tools = {};
+  for (const [name, args] of PROBES) tools[name] = probe(name, args, childEnv);
+  const swVers = runSync('sw_vers', ['-productVersion'], { env: childEnv, timeout: 10_000 });
+  const devDir = runSync('xcode-select', ['-p'], { env: childEnv, timeout: 10_000 });
+
+  const report = {
+    host: { platform: process.platform, arch: process.arch, macos: swVers.ok ? swVers.stdout.trim() : null },
+    developerDir: devDir.ok ? devDir.stdout.trim() : null,
+    tools,
+  };
+
+  if (!config) {
     report.signing = null;
     report.config = { error: configError };
+    return { report, exitCode: EXIT.ENV };
   }
-  return { report, exitCode: configError ? EXIT.ENV : EXIT.OK };
+
+  const pwEnv = config.updaterKeyPasswordEnv;
+  const notarizeNames = NOTARIZE_FIELDS.map(([key]) => config[key]).filter(Boolean);
+  report.signing = {
+    mode: config.signingMode,
+    identity: config.signingMode === 'identity',
+    updaterKey: Boolean(config.updaterKeyPath),
+    updaterKeyFound: config.updaterKeyPath ? fileExists(config.updaterKeyPath) : null,
+    updaterKeyPassword: Boolean(pwEnv),
+    updaterKeyPasswordSet: pwEnv ? typeof env[pwEnv] === 'string' : null,
+    notarize: notarizeNames.length > 0,
+    notarizeSet: notarizeNames.length ? notarizeNames.every((n) => typeof env[n] === 'string') : null,
+  };
+  report.config = {
+    file: tildify(config.file.path),
+    found: config.file.found,
+    sources: config.sources,
+    warnings: config.warnings,
+  };
+  const st = lock.inspect(config.lockDir);
+  report.lock = {
+    dir: tildify(config.lockDir),
+    held: st.held,
+    ...(st.held ? { pid: st.pid, startedAt: st.startedAt, project: st.project } : {}),
+  };
+  report.logDir = tildify(config.logDir);
+  return { report, exitCode: EXIT.OK };
 }
 
 module.exports = { collect, tildify, PROBES };

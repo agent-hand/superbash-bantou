@@ -32,7 +32,7 @@ async function main(argv, io = { stdout: process.stdout, stderr: process.stderr,
       case HELP:
         return help(values, io);
       case 'info': {
-        const { report, exitCode } = require('./info').collect({ env: io.env });
+        const { report, exitCode } = require('./info').collect({ env: io.env, stderr: io.stderr });
         writeJson(io.stdout, report);
         return exitCode;
       }
@@ -42,7 +42,7 @@ async function main(argv, io = { stdout: process.stdout, stderr: process.stderr,
         return exitCode;
       }
       case 'sign': {
-        const { exitCode, result } = require('./sign').signArtifact(values, { env: io.env });
+        const { exitCode, result } = require('./sign').signArtifact(values, { env: io.env, stderr: io.stderr });
         if (!result.ok) io.stderr.write(`macbuild: ${result.error}\n`);
         writeJson(io.stdout, result);
         return exitCode;

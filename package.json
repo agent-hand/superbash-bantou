@@ -1,6 +1,6 @@
 {
   "name": "superbash-macbuild",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "superbash の toolset: mac でしか出来ない build（Tauri）と codesign の署名の窓口",
   "license": "MIT",
   "files": [

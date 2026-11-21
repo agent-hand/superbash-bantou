@@ -1,15 +1,21 @@
 'use strict';
 // macbuild sign: 成果物を host の設定の identity（無ければ ad-hoc）で署名し直し、codesign で確かめる。
+// codesign の失敗の message は、返す前に identity・keychain の path などを伏せる。
 
 const fs = require('node:fs');
 const path = require('node:path');
 
 const codesign = require('./codesign');
-const { loadConfig, codesignIdentity } = require('./config');
+const { loadConfig, reportWarnings, codesignIdentity } = require('./config');
 const { EXIT, UsageError, EnvError } = require('./errors');
 const { which } = require('./proc');
+const { scrubEnv, secretsOf, makeRedactor } = require('./secrets');
 
-function signArtifact(values, { env = process.env, cwd = process.cwd() } = {}) {
+/**
+ * @param {object} values { path, entitlements?, noTimestamp? }
+ * @param {object} ctx { env, cwd, stderr, tool }（tool は test で codesign の代わりを渡すため）
+ */
+function signArtifact(values, { env = process.env, cwd = process.cwd(), stderr = process.stderr, tool = codesign } = {}) {
   if (process.platform !== 'darwin') throw new EnvError('mac（darwin）でしか動かない');
   const target = path.resolve(cwd, values.path);
   if (!fs.existsSync(target)) throw new UsageError(`署名する物が無い: ${target}`);
@@ -20,18 +26,26 @@ function signArtifact(values, { env = process.env, cwd = process.cwd() } = {}) {
   }
 
   const config = loadConfig({ env, cwd });
+  reportWarnings(config, stderr);
   if (!which('codesign', env)) throw new EnvError('codesign が無い');
+  const toolEnv = scrubEnv(env, config);
+  const redact = makeRedactor(secretsOf(config, env));
 
   const base = { path: target, signing: config.signingMode };
-  const s = codesign.sign(target, { identity: codesignIdentity(config), entitlements });
+  const s = tool.sign(target, {
+    identity: codesignIdentity(config),
+    entitlements,
+    noTimestamp: Boolean(values.noTimestamp),
+    env: toolEnv,
+  });
   if (!s.ok) {
-    return { exitCode: EXIT.FAIL, result: { ok: false, ...base, error: `署名が失敗: ${s.message}` } };
+    return { exitCode: EXIT.FAIL, result: { ok: false, ...base, error: redact(`署名が失敗: ${s.message}`) } };
   }
-  const v = codesign.verify(target);
-  const signature = codesign.describe(target);
+  const v = tool.verify(target, { env: toolEnv });
+  const signature = tool.describe(target, { env: toolEnv });
   const expected = config.signingMode === 'identity' ? 'certificate' : 'adhoc';
   let error = null;
-  if (!v.ok) error = `署名の確かめが通らない: ${v.message}`;
+  if (!v.ok) error = redact(`署名の確かめが通らない: ${v.message}`);
   else if (signature.kind !== expected) error = `署名が ${expected} でない（${signature.kind}）`;
   return {
     exitCode: error ? EXIT.FAIL : EXIT.OK,

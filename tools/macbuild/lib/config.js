@@ -1,6 +1,7 @@
 'use strict';
 // host の設定。項目ごとに 環境変数（MACBUILD_*）> 設定の file > 既定 の順で決める。
 // 鍵は path を持つだけで、中身は読まない・写さない・出力しない。
+// password と公証の資格は値を持たず、「値を持つ環境変数の名前」だけを持つ。
 
 const fs = require('node:fs');
 const os = require('node:os');
@@ -10,14 +11,28 @@ const { EnvError } = require('./errors');
 
 const CONFIG_ENV = 'MACBUILD_CONFIG';
 
-// file の key → 環境変数の名前と種類（path は ~ と相対 path を解く）。
+// file の key → 環境変数の名前と種類（path は ~ と相対 path を解く。envName は環境変数の名前）。
+// passAs: identity で build する時、その名前の変数の値を Tauri にこの名前で渡す（公証の資格）。
 const FIELDS = Object.freeze({
   identity: { env: 'MACBUILD_IDENTITY', kind: 'string' },
   updaterKeyPath: { env: 'MACBUILD_UPDATER_KEY_PATH', kind: 'path' },
   updaterKeyPasswordEnv: { env: 'MACBUILD_UPDATER_KEY_PASSWORD_ENV', kind: 'envName' },
+  appleIdEnv: { env: 'MACBUILD_APPLE_ID_ENV', kind: 'envName', passAs: 'APPLE_ID' },
+  applePasswordEnv: { env: 'MACBUILD_APPLE_PASSWORD_ENV', kind: 'envName', passAs: 'APPLE_PASSWORD' },
+  appleTeamIdEnv: { env: 'MACBUILD_APPLE_TEAM_ID_ENV', kind: 'envName', passAs: 'APPLE_TEAM_ID' },
+  appleApiKeyEnv: { env: 'MACBUILD_APPLE_API_KEY_ENV', kind: 'envName', passAs: 'APPLE_API_KEY' },
+  appleApiIssuerEnv: { env: 'MACBUILD_APPLE_API_ISSUER_ENV', kind: 'envName', passAs: 'APPLE_API_ISSUER' },
+  appleApiKeyPathEnv: { env: 'MACBUILD_APPLE_API_KEY_PATH_ENV', kind: 'envName', passAs: 'APPLE_API_KEY_PATH' },
   lockDir: { env: 'MACBUILD_LOCK_DIR', kind: 'path' },
   logDir: { env: 'MACBUILD_LOG_DIR', kind: 'path' },
 });
+
+/** 公証の資格: [設定の key, Tauri に渡す名前]。 */
+const NOTARIZE_FIELDS = Object.freeze(
+  Object.entries(FIELDS)
+    .filter(([, f]) => f.passAs)
+    .map(([key, f]) => [key, f.passAs]),
+);
 
 const ENV_NAME_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
@@ -26,13 +41,11 @@ function defaultConfigPath(home) {
 }
 
 function defaults(home) {
-  return {
-    identity: null,
-    updaterKeyPath: null,
-    updaterKeyPasswordEnv: null,
-    lockDir: path.join(home, 'Library', 'Caches', 'superbash-macbuild'),
-    logDir: path.join(home, 'Library', 'Logs', 'superbash-macbuild'),
-  };
+  const d = {};
+  for (const key of Object.keys(FIELDS)) d[key] = null;
+  d.lockDir = path.join(home, 'Library', 'Caches', 'superbash-macbuild');
+  d.logDir = path.join(home, 'Library', 'Logs', 'superbash-macbuild');
+  return d;
 }
 
 function expandPath(value, home, base) {
@@ -70,19 +83,13 @@ function readFile(file, explicit) {
   if (data === null || typeof data !== 'object' || Array.isArray(data)) {
     throw new EnvError(`設定の file は JSON の object でなければならない: ${file}`);
   }
-  for (const key of Object.keys(data)) {
-    if (key === '$schema') continue;
-    if (!Object.prototype.hasOwnProperty.call(FIELDS, key)) {
-      throw new EnvError(`設定の file に未知の key: ${key}（使える key: ${Object.keys(FIELDS).join(', ')}）`);
-    }
-  }
   return data;
 }
 
 /**
- * host の設定を読む。
- * @returns {{ identity, updaterKeyPath, updaterKeyPasswordEnv, lockDir, logDir,
- *            signingMode: 'adhoc'|'identity', sources: Object<string,string>,
+ * host の設定を読む。設定の file の未知の key は無視し、warnings に入れる（誤りにはしない）。
+ * @returns {{ identity, updaterKeyPath, updaterKeyPasswordEnv, apple*Env, lockDir, logDir,
+ *            signingMode: 'adhoc'|'identity', sources: Object<string,string>, warnings: string[],
  *            file: { path, explicit, found } }}
  */
 function loadConfig({ env = process.env, home = os.homedir(), cwd = process.cwd() } = {}) {
@@ -92,12 +99,18 @@ function loadConfig({ env = process.env, home = os.homedir(), cwd = process.cwd(
 
   const result = defaults(home);
   const sources = {};
+  const warnings = [];
   for (const key of Object.keys(FIELDS)) {
     sources[key] = result[key] === null ? 'unset' : 'default';
   }
   if (data) {
     for (const [key, value] of Object.entries(data)) {
-      if (key === '$schema' || value === null) continue;
+      if (key === '$schema') continue;
+      if (!Object.prototype.hasOwnProperty.call(FIELDS, key)) {
+        warnings.push(`設定の file の未知の key を無視する: ${key}`);
+        continue;
+      }
+      if (value === null) continue;
       result[key] = normalize(key, value, { home, base: path.dirname(filePath), where: '設定の file' });
       sources[key] = 'file';
     }
@@ -114,8 +127,14 @@ function loadConfig({ env = process.env, home = os.homedir(), cwd = process.cwd(
     ...result,
     signingMode,
     sources,
+    warnings,
     file: { path: filePath, explicit, found: data !== null },
   };
+}
+
+/** 設定の警告を stderr に出す。 */
+function reportWarnings(config, stderr) {
+  for (const w of config.warnings || []) stderr.write(`macbuild: 警告: ${w}\n`);
 }
 
 /** codesign に渡す identity（ad-hoc は `-`）。 */
@@ -123,4 +142,13 @@ function codesignIdentity(config) {
   return config.signingMode === 'identity' ? config.identity : '-';
 }
 
-module.exports = { CONFIG_ENV, FIELDS, defaultConfigPath, loadConfig, codesignIdentity, expandPath };
+module.exports = {
+  CONFIG_ENV,
+  FIELDS,
+  NOTARIZE_FIELDS,
+  defaultConfigPath,
+  loadConfig,
+  reportWarnings,
+  codesignIdentity,
+  expandPath,
+};

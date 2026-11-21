@@ -1,160 +1,100 @@
 'use strict';
-// build の排他（同時 1 本）。lock の dir の下に lock を 1 つ取る。
+// build の排他（同時 1 本）。lock の dir の下の lock の file に、kernel の排他 lock を取る
+// （open(2) の O_EXLOCK。flock と同じ lock で、開いた fd に付く）。
 //
-// - 取り方: 一時の dir に owner.json（pid・token・開始時刻・project）を書き、lock の名前へ rename する。
-//   rename は不可分で、既に lock（中身のある dir）があれば ENOTEMPTY/EEXIST で失敗する。
-//   owner.json の無い lock は生じない。
-// - 取れない時: 待たない。持ち主を返し、呼んだ側が終了 code 3 で終わる。
-// - 持ち主の process が居ない lock（SIGKILL・時間切れで止められた等）は古い lock とみなし、1 度だけ外して取り直す。
+// - 取れない時: 待たない（O_NONBLOCK で EAGAIN）。file に書かれた持ち主を返し、呼んだ側が終了 code 3 で終わる。
+// - 持ち主の process が終わると、SIGKILL（superbash の時間切れ）でも kernel が lock を外す。
+//   古い lock を見分けて外す処理が無いので、外す時の競合も、pid の使い回しで古い lock が生きて見える事も起きない。
+// - lock の file は消さない（消すと、消された inode と新しい file に別々の process が lock を取れてしまう）。
+//   外す時は中身を空にしてから閉じる。
+// - file の中身（pid・開始時刻・project）は表示のためだけで、排他の判定には使わない。
 
-const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 
 const LOCK_NAME = 'macbuild-tauri.lock';
-const OWNER_FILE = 'owner.json';
 
-function rmrf(p) {
-  fs.rmSync(p, { recursive: true, force: true });
+// macOS の <fcntl.h> の値（Node は定数を出していない）。
+const O_SHLOCK = fs.constants.O_SHLOCK || 0x10;
+const O_EXLOCK = fs.constants.O_EXLOCK || 0x20;
+
+function openLocked(lockPath, lockFlag, create) {
+  const c = fs.constants;
+  return fs.openSync(lockPath, c.O_RDWR | c.O_NONBLOCK | lockFlag | (create ? c.O_CREAT : 0), 0o644);
+}
+
+function isBusy(e) {
+  return e.code === 'EAGAIN' || e.code === 'EWOULDBLOCK';
 }
 
 function readOwner(lockPath) {
   try {
-    const owner = JSON.parse(fs.readFileSync(path.join(lockPath, OWNER_FILE), 'utf8'));
+    const text = fs.readFileSync(lockPath, 'utf8').trim();
+    const owner = text ? JSON.parse(text) : null;
     return owner && typeof owner === 'object' ? owner : null;
   } catch {
     return null;
   }
 }
 
-function pidAlive(pid) {
-  if (!Number.isInteger(pid) || pid <= 0) return false;
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (e) {
-    return e.code === 'EPERM'; // 居るが別の user
-  }
-}
-
-function exists(p) {
-  try {
-    fs.lstatSync(p);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/** lock の今の状態（info 用）。 */
-function inspect(lockDir) {
-  const lockPath = path.join(lockDir, LOCK_NAME);
-  if (!exists(lockPath)) return { path: lockPath, held: false };
-  const owner = readOwner(lockPath);
-  const alive = owner ? pidAlive(owner.pid) : false;
-  return {
-    path: lockPath,
-    held: true,
-    pid: owner ? owner.pid : null,
-    startedAt: owner ? owner.startedAt : null,
-    project: owner ? owner.project : null,
-    stale: !alive,
-  };
-}
-
-function tempName(lockDir, tag) {
-  return path.join(lockDir, `.${LOCK_NAME}.${tag}.${process.pid}.${crypto.randomBytes(6).toString('hex')}`);
-}
-
-// 古い lock を外す。見た時の持ち主（token）と違う lock を動かしてしまったら戻す。
-function breakStale(lockPath, seen) {
-  const moved = tempName(path.dirname(lockPath), 'stale');
-  try {
-    fs.renameSync(lockPath, moved);
-  } catch (e) {
-    if (e.code === 'ENOENT') return; // 先に誰かが外した
-    throw e;
-  }
-  const now = readOwner(moved);
-  if (seen && now && now.token !== seen.token) {
-    try {
-      fs.renameSync(moved, lockPath);
-      return;
-    } catch {
-      // 戻せない（既に別の lock がある）。動かした物は消す。
-    }
-  }
-  rmrf(moved);
+/** 出力に載せる持ち主。 */
+function publicOwner(owner) {
+  if (!owner) return null;
+  return { pid: owner.pid ?? null, startedAt: owner.startedAt ?? null, project: owner.project ?? null };
 }
 
 /**
- * lock を取る。
+ * lock を取る（待たない）。
  * @returns {{ acquired: true, path, owner, release: () => void } | { acquired: false, path, owner }}
  */
 function acquire(lockDir, meta = {}) {
   fs.mkdirSync(lockDir, { recursive: true });
   const lockPath = path.join(lockDir, LOCK_NAME);
-  const owner = {
-    pid: process.pid,
-    token: crypto.randomBytes(12).toString('hex'),
-    startedAt: new Date().toISOString(),
-    ...meta,
-  };
-
-  let brokeStale = false;
-  for (let attempt = 0; attempt < 4; attempt++) {
-    const tmp = tempName(lockDir, 'new');
-    fs.mkdirSync(tmp);
-    fs.writeFileSync(path.join(tmp, OWNER_FILE), JSON.stringify(owner) + '\n');
-    try {
-      fs.renameSync(tmp, lockPath);
-      let released = false;
-      return {
-        acquired: true,
-        path: lockPath,
-        owner,
-        release() {
-          if (released) return;
-          released = true;
-          release(lockPath, owner.token);
-        },
-      };
-    } catch (e) {
-      rmrf(tmp);
-      if (e.code !== 'ENOTEMPTY' && e.code !== 'EEXIST') throw e;
-    }
-
-    const current = readOwner(lockPath);
-    if (!current && !exists(lockPath)) continue; // 間で外された。取り直す
-    const stale = !current || !pidAlive(current.pid);
-    if (stale && !brokeStale) {
-      brokeStale = true;
-      breakStale(lockPath, current);
-      continue;
-    }
-    return { acquired: false, path: lockPath, owner: current };
-  }
-  return { acquired: false, path: lockPath, owner: readOwner(lockPath) };
-}
-
-/** 自分の token の lock だけを外す。 */
-function release(lockPath, token) {
-  const owner = readOwner(lockPath);
-  if (!owner || owner.token !== token) return false;
-  const moved = tempName(path.dirname(lockPath), 'release');
+  let fd;
   try {
-    fs.renameSync(lockPath, moved);
-  } catch {
-    return false;
+    fd = openLocked(lockPath, O_EXLOCK, true);
+  } catch (e) {
+    if (isBusy(e)) return { acquired: false, path: lockPath, owner: readOwner(lockPath) };
+    throw e;
   }
-  rmrf(moved);
-  return true;
+  const owner = { pid: process.pid, startedAt: new Date().toISOString(), ...meta };
+  fs.ftruncateSync(fd, 0);
+  fs.writeSync(fd, JSON.stringify(owner) + '\n', 0);
+  let released = false;
+  return {
+    acquired: true,
+    path: lockPath,
+    owner,
+    release() {
+      if (released) return;
+      released = true;
+      try {
+        fs.ftruncateSync(fd, 0);
+      } finally {
+        fs.closeSync(fd); // ここで kernel の lock が外れる
+      }
+    },
+  };
 }
 
-/** 出力に載せる持ち主（token は出さない）。 */
-function publicOwner(owner) {
-  if (!owner) return null;
-  return { pid: owner.pid, startedAt: owner.startedAt, project: owner.project || null };
+/**
+ * lock の今の状態（info 用）。中身が空なら持ち主は居ない。中身がある時だけ、共有の lock を試して確かめる
+ * （SIGKILL で終わった持ち主は中身を残すが、lock は kernel が外している）。
+ */
+function inspect(lockDir) {
+  const lockPath = path.join(lockDir, LOCK_NAME);
+  const owner = readOwner(lockPath);
+  if (!owner) return { path: lockPath, held: false };
+  let fd;
+  try {
+    fd = openLocked(lockPath, O_SHLOCK, false);
+  } catch (e) {
+    if (isBusy(e)) return { path: lockPath, held: true, ...publicOwner(owner) };
+    if (e.code === 'ENOENT') return { path: lockPath, held: false };
+    throw e;
+  }
+  fs.closeSync(fd);
+  return { path: lockPath, held: false };
 }
 
-module.exports = { LOCK_NAME, acquire, release, inspect, pidAlive, publicOwner };
+module.exports = { LOCK_NAME, acquire, inspect, publicOwner, readOwner };
