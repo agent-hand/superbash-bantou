@@ -109,6 +109,8 @@ superbash の MCP の設定の 1 件として書く。toolset は package の名
 
 `--allow-cmd macbuild-info,macbuild-tauri` のように、出す command を絞れる。
 
+toolset を変えたら `package.json` の `version` を上げる。superbash 0.1.0 は起動のたびに package を生成し直すが、npx は生成した tarball の path と名前@版が同じだと、前に展開した写し（npm の cache の `_npx/`）を使い続ける（この Mac で確かめた）。
+
 ## 前提
 
 - macOS、node 18 以上、`codesign`（OS に有る）。
