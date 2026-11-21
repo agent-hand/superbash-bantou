@@ -56,6 +56,21 @@ test('secretsOf と makeRedactor: identity・team id・鍵の path・名前の�
   assert.match(out, /using keychain <keychain>/);
 });
 
+test('N1: identity を team id 抜きの前方一致の名前で設定した時、ambiguous の message の候補の team id も伏せる', () => {
+  const prefix = 'Developer ID Application: Fake Example Corp';
+  const redact = makeRedactor(secretsOf({ signingMode: 'identity', identity: prefix }, {}));
+  const message =
+    `error: ${prefix}: ambiguous (matches "${prefix} (FAKE123456)" and "${prefix}(FAKE654321)" ` +
+    'in /var/example/Library/Keychains/login.keychain-db)';
+  const out = redact(message);
+  for (const secret of [prefix, 'FAKE123456', 'FAKE654321', 'login.keychain-db']) {
+    assert.equal(out.includes(secret), false, `${secret} が残っている: ${out}`);
+  }
+  assert.equal(out, 'error: <identity>: ambiguous (matches "<identity> (<team-id>)" and "<identity>(<team-id>)" in <keychain>)');
+  // identity の直後でない 10 文字の括弧（ほかの文脈）は変えない。
+  assert.equal(redact('build (ABCDEFGHIJ) done'), 'build (ABCDEFGHIJ) done');
+});
+
 test('ad-hoc（`-`）と短すぎる値は伏せない（log を壊さない）', () => {
   const redact = makeRedactor(secretsOf({ signingMode: 'adhoc', identity: '-', updaterKeyPasswordEnv: 'PW' }, { PW: 'ab' }));
   assert.equal(redact('Signing with identity "-" ab'), 'Signing with identity "-" ab');

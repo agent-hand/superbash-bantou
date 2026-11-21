@@ -146,6 +146,7 @@ const PARENT = Object.freeze({
   EXAMPLE_APPLE_ID: FAKE.appleId,
   EXAMPLE_APPLE_PW: FAKE.applePassword,
   EXAMPLE_TEAM: FAKE.appleTeamId,
+  EXAMPLE_PROVIDER: FAKE.providerShortName,
   KEEP_ME: 'ordinary',
 });
 
@@ -169,14 +170,24 @@ test('M3: identity の時も生の APPLE_* は渡さず、公証の資格は設�
     appleIdEnv: 'EXAMPLE_APPLE_ID',
     applePasswordEnv: 'EXAMPLE_APPLE_PW',
     appleTeamIdEnv: 'EXAMPLE_TEAM',
+    appleProviderShortNameEnv: 'EXAMPLE_PROVIDER',
   };
   const env = tauri.tauriEnv(config, { baseEnv: PARENT, targetDir: '/t/target' });
-  assert.deepEqual(appleKeys(env), ['APPLE_ID', 'APPLE_PASSWORD', 'APPLE_SIGNING_IDENTITY', 'APPLE_TEAM_ID']);
+  assert.deepEqual(appleKeys(env), [
+    'APPLE_ID',
+    'APPLE_PASSWORD',
+    'APPLE_PROVIDER_SHORT_NAME',
+    'APPLE_SIGNING_IDENTITY',
+    'APPLE_TEAM_ID',
+  ]);
+  assert.equal(env.APPLE_PROVIDER_SHORT_NAME, FAKE.providerShortName, 'N2: 親の APPLE_PROVIDER_SHORT_NAME でなく、設定の名前の変数の値');
   assert.equal(env.APPLE_SIGNING_IDENTITY, FAKE.identity);
   assert.equal(env.APPLE_ID, FAKE.appleId, '親の APPLE_ID でなく、設定の名前の変数の値');
   assert.equal(env.APPLE_PASSWORD, FAKE.applePassword);
   assert.equal(env.APPLE_TEAM_ID, FAKE.appleTeamId);
-  for (const k of ['EXAMPLE_APPLE_ID', 'EXAMPLE_APPLE_PW', 'EXAMPLE_TEAM']) assert.equal(env[k], undefined, `元の ${k} は渡さない`);
+  for (const k of ['EXAMPLE_APPLE_ID', 'EXAMPLE_APPLE_PW', 'EXAMPLE_TEAM', 'EXAMPLE_PROVIDER']) {
+    assert.equal(env[k], undefined, `元の ${k} は渡さない`);
+  }
   assert.equal(env.CARGO_TARGET_DIR, '/t/target');
   assert.equal(PARENT.APPLE_ID, FAKE.parentAppleId, '親の環境は変えない');
 

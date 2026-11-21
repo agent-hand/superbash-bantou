@@ -23,6 +23,11 @@ const FIELDS = Object.freeze({
   appleApiKeyEnv: { env: 'MACBUILD_APPLE_API_KEY_ENV', kind: 'envName', passAs: 'APPLE_API_KEY' },
   appleApiIssuerEnv: { env: 'MACBUILD_APPLE_API_ISSUER_ENV', kind: 'envName', passAs: 'APPLE_API_ISSUER' },
   appleApiKeyPathEnv: { env: 'MACBUILD_APPLE_API_KEY_PATH_ENV', kind: 'envName', passAs: 'APPLE_API_KEY_PATH' },
+  appleProviderShortNameEnv: {
+    env: 'MACBUILD_APPLE_PROVIDER_SHORT_NAME_ENV',
+    kind: 'envName',
+    passAs: 'APPLE_PROVIDER_SHORT_NAME', // 複数の team に属する Apple ID で公証する時
+  },
   lockDir: { env: 'MACBUILD_LOCK_DIR', kind: 'path' },
   logDir: { env: 'MACBUILD_LOG_DIR', kind: 'path' },
 });

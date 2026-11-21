@@ -51,9 +51,10 @@ const MAX_PENDING = 256 * 1024;
 
 /**
  * 起動し、stdout と stderr を行ごとに redact に通して fd（log の file）へ書く。
+ * tap(raw) には伏せる前の同じ区切りの文字列を渡す（成果物の path を拾うため。file には書かない）。
  * onSpawn(child) で child を渡す（signal を渡すため）。
  */
-function runToLog(cmd, args, { cwd, env, fd, redact = (s) => s, onSpawn } = {}) {
+function runToLog(cmd, args, { cwd, env, fd, redact = (s) => s, tap = () => {}, onSpawn } = {}) {
   return new Promise((resolve) => {
     let done = false;
     const finish = (r) => {
@@ -73,12 +74,17 @@ function runToLog(cmd, args, { cwd, env, fd, redact = (s) => s, onSpawn } = {}) 
             pending += chunk;
             const cut = pending.length > MAX_PENDING ? pending.length : pending.lastIndexOf('\n') + 1;
             if (cut > 0) {
-              fs.writeSync(fd, redact(pending.slice(0, cut)));
+              const raw = pending.slice(0, cut);
+              tap(raw);
+              fs.writeSync(fd, redact(raw));
               pending = pending.slice(cut);
             }
           });
           stream.on('end', () => {
-            if (pending) fs.writeSync(fd, redact(pending));
+            if (pending) {
+              tap(pending);
+              fs.writeSync(fd, redact(pending));
+            }
             res();
           });
           stream.on('error', res);

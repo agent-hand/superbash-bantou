@@ -20,6 +20,7 @@ const FAKE = Object.freeze({
   parentAppleId: 'parent-apple-id@example.invalid',
   parentApplePassword: 'parent-apple-password',
   updaterPassword: 'fake-updater-password',
+  providerShortName: 'FakeProvider42',
 });
 
 function makeTmp(prefix = 'macbuild-test-') {
@@ -58,7 +59,7 @@ function runCli(args, { env, cwd } = {}) {
 // 偽の Tauri の CLI。受けた引数と、環境の APPLE_*・TAURI_* の値と全変数の名前を record.json に書く。
 // Tauri と同じく「Signing with identity "<identity>"」と keychain の path を出す。
 // identity が `-` の時だけ Fake.app を ad-hoc で codesign する（偽の identity では codesign を呼ばない）。
-// project に fail という file があれば失敗する。
+// project に fail という file があれば失敗する。FAKE_BUNDLE_DIR があれば Fake.app をその下に作る。
 const FAKE_TAURI = `#!/usr/bin/env node
 'use strict';
 const { spawnSync } = require('node:child_process');
@@ -84,7 +85,9 @@ if (fs.existsSync(path.join(project, 'fail'))) {
   process.exit(1);
 }
 const target = env.CARGO_TARGET_DIR || path.join(project, 'src-tauri', 'target');
-const app = path.join(target, 'release', 'bundle', 'macos', 'Fake.app');
+const app = env.FAKE_BUNDLE_DIR
+  ? path.join(env.FAKE_BUNDLE_DIR, 'Fake.app')
+  : path.join(target, 'release', 'bundle', 'macos', 'Fake.app');
 fs.mkdirSync(path.join(app, 'Contents', 'MacOS'), { recursive: true });
 fs.writeFileSync(path.join(app, 'Contents', 'MacOS', 'fake'), '#!/usr/bin/env node\\n');
 fs.chmodSync(path.join(app, 'Contents', 'MacOS', 'fake'), 0o755);

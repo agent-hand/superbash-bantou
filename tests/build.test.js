@@ -125,9 +125,12 @@ test('M3: identity の時、公証の資格は設定の名前の変数の値だ�
       MACBUILD_APPLE_ID_ENV: 'EXAMPLE_APPLE_ID',
       MACBUILD_APPLE_PASSWORD_ENV: 'EXAMPLE_APPLE_PW',
       MACBUILD_APPLE_TEAM_ID_ENV: 'EXAMPLE_TEAM',
+      MACBUILD_APPLE_PROVIDER_SHORT_NAME_ENV: 'EXAMPLE_PROVIDER',
       EXAMPLE_APPLE_ID: FAKE.appleId,
       EXAMPLE_APPLE_PW: FAKE.applePassword,
       EXAMPLE_TEAM: FAKE.appleTeamId,
+      EXAMPLE_PROVIDER: FAKE.providerShortName,
+      APPLE_PROVIDER_SHORT_NAME: 'parent-provider',
       APPLE_ID: FAKE.parentAppleId,
       APPLE_PASSWORD: FAKE.parentApplePassword,
       APPLE_API_KEY: 'parent-api-key',
@@ -143,12 +146,34 @@ test('M3: identity の時、公証の資格は設定の名前の変数の値だ�
       APPLE_ID: FAKE.appleId,
       APPLE_PASSWORD: FAKE.applePassword,
       APPLE_TEAM_ID: FAKE.appleTeamId,
+      APPLE_PROVIDER_SHORT_NAME: FAKE.providerShortName,
     });
-    for (const k of ['EXAMPLE_APPLE_ID', 'EXAMPLE_APPLE_PW', 'EXAMPLE_TEAM']) {
+    for (const k of ['EXAMPLE_APPLE_ID', 'EXAMPLE_APPLE_PW', 'EXAMPLE_TEAM', 'EXAMPLE_PROVIDER']) {
       assert.equal(rec.keys.includes(k), false, `元の ${k} は渡さない`);
     }
     const all = r.stdout + r.stderr + fs.readFileSync(r.json.log, 'utf8');
     assertNoSecrets(all, [FAKE.appleId, FAKE.applePassword, FAKE.appleTeamId, FAKE.parentAppleId], '出力と log');
+  }));
+
+test('N3: 成果物の path は伏せる前の出力から拾う（秘密の値が path の一部と一致しても壊さない。log は伏せる）', () =>
+  withHome((home) => {
+    // 公証の資格の変数（ad-hoc なので Tauri には渡らない）の値が、成果物の dir の名前と同じ。
+    const secretDir = 'fakesecretdir';
+    const bundleDir = path.join(home, secretDir, 'out');
+    const { project, env } = setup(home, {
+      MACBUILD_APPLE_PASSWORD_ENV: 'EXAMPLE_APPLE_PW',
+      EXAMPLE_APPLE_PW: secretDir,
+      FAKE_BUNDLE_DIR: bundleDir, // 既定の target の dir の外（log から拾えないと見つからない所）
+    });
+    const r = runCli(['tauri', project], { env });
+    assert.equal(r.status, EXIT.OK, r.stderr + r.stdout);
+    const app = path.join(bundleDir, 'Fake.app');
+    assert.equal(r.json.artifacts.length, 1);
+    assert.equal(r.json.artifacts[0].path, app);
+    assert.equal(r.json.artifacts[0].verified, true);
+    const log = fs.readFileSync(r.json.log, 'utf8');
+    assert.equal(log.includes(secretDir), false, 'log では伏せる');
+    assert.ok(log.includes(path.join(home, '<secret>', 'out', 'Fake.app')), log);
   }));
 
 test('tauri: updater の鍵は path を渡し、password は設定の環境変数名から引く（中身は出さない）', () =>
@@ -278,6 +303,24 @@ test('M2: sign の codesign の失敗の message から identity・team id・key
     assertNoSecrets(JSON.stringify(failedVerify.result), [FAKE.identity, FAKE.teamId, 'Keychains'], 'verify の error');
     assert.equal(calls[1].noTimestamp, true);
     assert.equal(stderrChunks.join(''), '', '設定の警告が無ければ stderr に何も出さない');
+  }));
+
+test('N1: identity を team id 抜きで設定した時の ambiguous の message でも、候補の team id を伏せる', () =>
+  withHome((home) => {
+    const target = path.join(home, 'A.app');
+    fs.mkdirSync(target);
+    const prefix = 'Developer ID Application: Fake Example Corp';
+    const env = cleanEnv(home, { MACBUILD_IDENTITY: prefix });
+    const ambiguous = `${prefix}: ambiguous (matches "${prefix} (FAKE123456)" and "${prefix} (FAKE654321)" in ${path.join(home, 'Library', 'Keychains', 'login.keychain-db')})`;
+    const tool = {
+      sign: () => ({ ok: false, message: ambiguous }),
+      verify: () => ({ ok: true, message: null }),
+      describe: () => ({ kind: 'certificate', identifier: null, format: null, runtime: false }),
+    };
+    const r = signArtifact({ path: target }, { env, stderr: { write() {} }, tool });
+    assert.equal(r.exitCode, EXIT.FAIL);
+    assertNoSecrets(r.result.error, [prefix, 'FAKE123456', 'FAKE654321', 'Keychains'], 'sign の error');
+    assert.match(r.result.error, /"<identity> \(<team-id>\)" and "<identity> \(<team-id>\)" in <keychain>/);
   }));
 
 test('L2: codesign の呼び出しと info の版の照会の子に、署名・公証・updater の秘密の変数を渡さない', () =>

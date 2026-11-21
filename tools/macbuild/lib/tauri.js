@@ -8,6 +8,7 @@
 //   updater の鍵は path を TAURI_SIGNING_PRIVATE_KEY に、password は設定の環境変数名の値を TAURI_SIGNING_PRIVATE_KEY_PASSWORD に入れる。
 //   identity の時だけ、公証の資格を設定の環境変数名の値から Tauri の名前（APPLE_ID など）で入れる。
 // - build の出力は行ごとに秘密を伏せて log の file に書く。stderr には進捗だけ、失敗の時は（伏せた）log の末尾を出す。
+//   成果物の path は伏せる前の出力から拾う（秘密の値が path の一部と一致しても path を壊さない）。
 
 const fs = require('node:fs');
 const os = require('node:os');
@@ -81,8 +82,8 @@ function artifactKind(p) {
 const ANSI_RE = /\x1b\[[0-9;]*[A-Za-z]/g;
 
 /** Tauri の「Finished N bundle(s) at:」「Finished N updater signature(s) at:」の下の path を拾う。 */
-function parseFinishedPaths(logText) {
-  const lines = logText.replace(ANSI_RE, '').split('\n');
+function parseFinishedPaths(text) {
+  const lines = text.replace(ANSI_RE, '').split('\n');
   const found = [];
   for (let i = 0; i < lines.length; i++) {
     if (!/Finished \d+ .* at:\s*$/.test(lines[i])) continue;
@@ -205,6 +206,7 @@ async function build(values, { stderr = process.stderr, env = process.env, cwd =
   process.on('exit', held.release);
 
   const logPath = path.join(config.logDir, `tauri-${stamp(new Date(started))}-${process.pid}.log`);
+  let rawOutput = ''; // 伏せる前の出力（memory の中だけ。成果物の path を拾う）
   try {
     say(`lock を取った: ${held.path}`);
     const fd = fs.openSync(logPath, 'a');
@@ -228,6 +230,9 @@ async function build(values, { stderr = process.stderr, env = process.env, cwd =
         env: childEnv,
         fd,
         redact,
+        tap: (raw) => {
+          rawOutput += raw;
+        },
         onSpawn: (c) => {
           child = c;
         },
@@ -251,8 +256,8 @@ async function build(values, { stderr = process.stderr, env = process.env, cwd =
       fs.closeSync(fd);
     }
 
-    const logText = fs.readFileSync(logPath, 'utf8');
-    let paths = parseFinishedPaths(logText).filter((p) => fs.existsSync(p));
+    let paths = parseFinishedPaths(rawOutput).filter((p) => fs.existsSync(p));
+    rawOutput = '';
     if (paths.length === 0) {
       paths = scanBundleDir({ project, targetDir, target: values.target, debug: values.debug, since: started });
     }

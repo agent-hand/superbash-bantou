@@ -45,6 +45,7 @@ test('何も無い時は既定（ad-hoc・lock と log は home の Library の�
       appleApiKeyEnv: 'unset',
       appleApiIssuerEnv: 'unset',
       appleApiKeyPathEnv: 'unset',
+      appleProviderShortNameEnv: 'unset',
       lockDir: 'default',
       logDir: 'default',
     });
@@ -54,7 +55,13 @@ test('何も無い時は既定（ad-hoc・lock と log は home の Library の�
 test('公証の資格は「値を持つ環境変数の名前」だけを持つ（file と MACBUILD_APPLE_*_ENV）', () =>
   withTmp((home) => {
     writeJson(defaultConfigPath(home), { appleIdEnv: 'EXAMPLE_APPLE_ID', applePasswordEnv: 'EXAMPLE_APPLE_PW' });
-    const c = loadConfig({ env: { MACBUILD_APPLE_TEAM_ID_ENV: 'EXAMPLE_TEAM' }, home, cwd: home });
+    const c = loadConfig({
+      env: { MACBUILD_APPLE_TEAM_ID_ENV: 'EXAMPLE_TEAM', MACBUILD_APPLE_PROVIDER_SHORT_NAME_ENV: 'EXAMPLE_PROVIDER' },
+      home,
+      cwd: home,
+    });
+    assert.equal(c.appleProviderShortNameEnv, 'EXAMPLE_PROVIDER');
+    assert.equal(c.sources.appleProviderShortNameEnv, 'env');
     assert.equal(c.appleIdEnv, 'EXAMPLE_APPLE_ID');
     assert.equal(c.applePasswordEnv, 'EXAMPLE_APPLE_PW');
     assert.equal(c.appleTeamIdEnv, 'EXAMPLE_TEAM');
