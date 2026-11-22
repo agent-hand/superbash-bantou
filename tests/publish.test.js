@@ -56,11 +56,11 @@ const noLeak = (r, ...secrets) => {
 
 // ---- spec と CLI の整合 ----
 
-test('manifest の木: 上の要素は npm・github・gitea（各 spec.subcommand に同じ語）、葉は 5 つ、版は 0.6.0、PR と CI の command は無い', () => {
+test('manifest の木: 上の要素は npm・github・gitea（各 spec.subcommand に同じ語）、葉は 5 つ、版は 0.6.1、PR と CI の command は無い', () => {
   assert.deepEqual(pubTops.map((c) => [c.name, c.spec.subcommand, c.version]), [
-    ['npm', 'npm', '0.6.0'],
-    ['github', 'github', '0.6.0'],
-    ['gitea', 'gitea', '0.6.0'],
+    ['npm', 'npm', '0.6.1'],
+    ['github', 'github', '0.6.1'],
+    ['gitea', 'gitea', '0.6.1'],
   ]);
   assert.deepEqual(pubLeaves.map((l) => l.name), NAMES);
   assert.deepEqual(pubLeaves.map((l) => l.head.join(' ')), NAMES, '葉の argv の頭は並びの名前と同じ');

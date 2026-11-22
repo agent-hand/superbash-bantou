@@ -1,10 +1,10 @@
 # superbash-bantou
 
-[superbash](https://github.com/agent-hand/superbash) の toolset（0.6.0）。mac でしか出来ない build（Tauri）と codesign の署名（`macbuild` の下に `info`・`tauri`・`sign`）、npm の package の公開と GitHub・Gitea の repo・release の作成（`npm`・`github`・`gitea` の下のサブコマンド）を、MCP の道具 `superbash-command` の command として出す。
+[superbash](https://github.com/agent-hand/superbash) の toolset（0.6.1）。mac でしか出来ない build（Tauri）と codesign の署名（`macbuild` の下に `info`・`tauri`・`sign`）、npm の package の公開と GitHub・Gitea の repo・release の作成（`npm`・`github`・`gitea` の下のサブコマンド）を、MCP の道具 `superbash-command` の command として出す。
 
 **使える superbash の版: 0.2.0 以上。** 0.3.0 以降の manifest は入れ子のサブコマンド（superbash 0.2.0 で対応）で書いてあり、0.1.x は読めない（群に `spec` が無いので「形が不正」で止まるか、`subcommands` を黙って捨てる）。呼ぶ名前は `macbuild info` のように空白で区切った並び。
 
-0.6.0 は、superbash 0.4.0 の `--sandbox` 用の方針を manifest に足した版（下の「sandbox」）。呼ぶ名前・引数・出力・終了 code は 0.5.0 と同じ。
+0.6.1 は、README の「sandbox」に、方針の範囲の限りを足した版（manifest の方針は 0.6.0 のまま）。0.6.0 は、superbash 0.4.0 の `--sandbox` 用の方針を manifest に足した版（下の「sandbox」）。呼ぶ名前・引数・出力・終了 code は 0.5.0 と同じ。
 
 0.5.0 は、busybox 化の module 対応を足した版（toolset の作法 5.4）。各 tool は `dist/cli.mjs`（入口）に加え、読み込んでも走らない module `dist/main.mjs` を出し、manifest の `tools.<名前>.module` が指す。module は `main`（citty の command）と `run(rawArgs: string[]): Promise<number>`（`runCommand` で呼び、使い方の誤りは 2・その他の誤りは 1 などの終了 code を返す）を export する。`cli.mjs` は `run(process.argv.slice(2))` の結果を終了 code にするだけ。呼ぶ名前・引数・出力・終了 code は 0.4.0 と同じ。module を知らない superbash（0.2.0）は今までどおり entry（`cli.mjs`）で動く。1 つの実行 file にはまとめない。
 
@@ -195,6 +195,11 @@ superbash 0.4.0 は `--sandbox` で command を閉じた環境で動かせる。
 | `publish`（`npm`・`github`・`gitea`） | `~/.npm`・`~/.config/gh`・`$TMPDIR` | true | npm の cache、gh の設定の dir、一時の dir。公開先への通信 |
 
 `--sandbox` を使わない時は、この項は効かない（読まれるだけ）。
+
+方針の範囲の限り（`--sandbox` を使う時）:
+
+- `macbuild` の write は home 以下（`~`）と `$TMPDIR` だけ。home の外にある project は build できない（その project の path を write に足す方針の変更が要る）。
+- `publish` の write は `~/.npm`・`~/.config/gh`・`$TMPDIR` だけ。`gh`・`git` の credential の helper が、これ以外の場所（例: keychain の file、`~/.git-credentials`、別の config の dir）に書く構成では、足りない事がある。その時は、公開の操作が書き込みの拒否で失敗する。
 
 ## MCP の設定（host の側）
 
