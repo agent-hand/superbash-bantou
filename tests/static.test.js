@@ -18,8 +18,13 @@ function walk(dir, out = []) {
   return out;
 }
 
+// 検査する code: source（src/**/*.ts）と、配る物（dist/cli.mjs。citty を含む）。
+function codeFiles() {
+  return walk(path.join(ROOT, 'tools')).filter((f) => (f.includes(`${path.sep}src${path.sep}`) && f.endsWith('.ts')) || (f.includes(`${path.sep}dist${path.sep}`) && f.endsWith('.mjs')));
+}
+
 test('tools/ の code は shell を通さない（shell の option・exec・sh -c を使わない）', () => {
-  const files = walk(path.join(ROOT, 'tools')).filter((f) => f.includes(`${path.sep}src${path.sep}`)).filter((f) => f.endsWith('.ts'));
+  const files = codeFiles();
   assert.ok(files.length > 0);
   const forbidden = [
     /\bshell\s*:/, // spawn の shell の option
@@ -35,7 +40,7 @@ test('tools/ の code は shell を通さない（shell の option・exec・sh -
 });
 
 test('宛先を持たない: tools/ の code と manifest に、設定 key・環境変数・URL の定数・URL を組む code が無い', () => {
-  const files = [...walk(path.join(ROOT, 'tools')).filter((f) => f.includes(`${path.sep}src${path.sep}`)).filter((f) => f.endsWith('.ts')), path.join(ROOT, '.manifest', 'toolconfig.json')];
+  const files = [...codeFiles(), path.join(ROOT, '.manifest', 'toolconfig.json')];
   const forbidden = [
     /verdaccio/i,
     /PUBLISH_/,
