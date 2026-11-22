@@ -29,6 +29,15 @@ const path = require('node:path');
 const name = path.basename(process.argv[1]);
 const args = process.argv.slice(2);
 const env = process.env;
+// npm ping: 起動を .ping に記録する（publish の record と分ける）。FAKE_PING_REAL なら --registry に実際に接続して届くかを返す。
+if (name === 'npm' && args[0] === 'ping') {
+  if (env.FAKE_RECORD) fs.writeFileSync(path.join(env.FAKE_RECORD, 'npm-' + process.pid + '.ping'), JSON.stringify({ args, cwd: process.cwd() }));
+  if (!env.FAKE_PING_REAL) process.exit(0);
+  const url = args[args.indexOf('--registry') + 1];
+  const req = require('node:http').get(url, { timeout: 8000 }, (res) => { res.resume(); process.exit(res.statusCode < 500 ? 0 : 1); });
+  req.on('timeout', () => req.destroy(new Error('timeout')));
+  req.on('error', (e) => { process.stderr.write('npm error code ' + (e.code || 'ERR') + '\\n'); process.exit(1); });
+} else {
 if (env.FAKE_RECORD) {
   const keep = Object.fromEntries(Object.entries(env).filter(([k]) => /^(NPM_|GH_|GITHUB_|PUBLISH_)/.test(k)));
   fs.writeFileSync(path.join(env.FAKE_RECORD, name + '-' + process.pid + '.json'), JSON.stringify({ name, args, cwd: process.cwd(), env: keep }));
@@ -38,6 +47,7 @@ else if (name === 'gh' && args[0] === 'repo') console.log('https://github.com/' 
 else if (name === 'gh' && args[0] === 'release') console.log('https://github.com/' + args.find((a) => a.startsWith('--repo=')).slice(7) + '/releases/tag/' + args[2]);
 if (env.FAKE_STDERR) process.stderr.write(env.FAKE_STDERR + '\\n');
 process.exit(Number(env.FAKE_EXIT || 0));
+}
 `;
 
 /** 偽の npm・gh を置いた bin の dir を作り、その dir を先頭にした PATH を返す（tar・git は本物）。 */
@@ -54,6 +64,14 @@ function readRecords(dir) {
   return fs
     .readdirSync(dir)
     .filter((f) => f.endsWith('.json'))
+    .map((f) => JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8')));
+}
+
+/** 偽の npm が受けた ping の記録（args・cwd）。 */
+function readPings(dir) {
+  return fs
+    .readdirSync(dir)
+    .filter((f) => f.endsWith('.ping'))
     .map((f) => JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8')));
 }
 
@@ -163,4 +181,4 @@ async function startFakeGitea({ token, handler } = {}) {
   };
 }
 
-module.exports = { MAIN, FAKE, makeTmp, makeFakeBin, readRecords, makeFakeHome, baseEnv, runPublish, startFakeGitea };
+module.exports = { MAIN, FAKE, makeTmp, makeFakeBin, readRecords, readPings, makeFakeHome, baseEnv, runPublish, startFakeGitea };
