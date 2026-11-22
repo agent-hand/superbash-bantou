@@ -1380,7 +1380,7 @@ var tauri = defineCommand({
 var main = defineCommand({
   meta: {
     name: "macbuild",
-    version: "0.6.0",
+    version: "0.6.1",
     description: "mac \u3067\u3057\u304B\u51FA\u6765\u306A\u3044 build\uFF08Tauri\uFF09\u3068 codesign \u306E\u7F72\u540D\u306E\u7A93\u53E3\u3002\u7F72\u540D\u306E identity\u30FBupdater \u306E\u9375\u30FB\u516C\u8A3C\u306E\u8CC7\u683C\u306F host \u306E\u8A2D\u5B9A\u304B\u3089\u8AAD\u307F\u3001\u9053\u5177\u306E\u5F15\u6570\u306B\u3082\u51FA\u529B\u306B\u3082\u51FA\u3055\u306A\u3044\u3002"
   },
   subCommands: { help, info, tauri, sign: sign2 }
