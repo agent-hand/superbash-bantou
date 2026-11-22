@@ -5,6 +5,7 @@
 const assert = require('node:assert/strict');
 const { spawnSync } = require('node:child_process');
 const fs = require('node:fs');
+const http = require('node:http');
 const path = require('node:path');
 const test = require('node:test');
 
@@ -52,10 +53,10 @@ const noLeak = (r, ...secrets) => {
 
 // ---- spec と CLI の整合 ----
 
-test('publish の command は 6 つで、tool は publish・版は 0.2.0・PR と CI の command は無い', () => {
+test('publish の command は 6 つで、tool は publish・版は 0.2.1・PR と CI の command は無い', () => {
   assert.deepEqual(pubCommands.map((c) => c.name), NAMES);
   for (const c of pubCommands) {
-    assert.equal(c.version, '0.2.0');
+    assert.equal(c.version, '0.2.1');
     assert.equal(c.spec.subcommand, c.name);
   }
   assert.ok(!pubCommands.some((c) => /(^|-)(pr|pull|merge|ci|run|status)(-|$)/.test(c.name)));
@@ -189,6 +190,53 @@ test('npm-publish: tarball も受ける（名前と版は tarball の package.js
   assert.equal(r.json.name, 'tar-pkg');
   assert.equal(r.json.registry, VERDACCIO);
   assert.deepEqual(H.readRecords(record)[0].args.slice(0, 4), ['publish', tgz, '--registry', VERDACCIO]);
+});
+
+test('publish の前に registry へ届くかを短い上限・retry 無しで確かめる（dry-run でも）', async (t) => {
+  const { work, record, run } = setup(t);
+  const dir = makePackage(work, { name: 'example-pkg', version: '1.0.0' });
+  const r = await run(['npm-publish', '--dry-run', dir]);
+  assert.equal(r.status, 0, r.stderr);
+  const [ping] = H.readPings(record);
+  assert.deepEqual(ping.args, ['ping', '--registry', NPMJS, '--fetch-retries=0', '--fetch-timeout=10000']);
+  assert.equal(H.readRecords(record).length, 1, 'publish は 1 回');
+});
+
+test('verdaccio-publish: 届かない registry（閉じた port）では、すぐ ok:false を返し publish を走らせない', async (t) => {
+  const { work, record, run } = setup(t);
+  const dir = makePackage(work, { name: 'example-pkg', version: '1.0.0' });
+  const srv = http.createServer();
+  await new Promise((res) => srv.listen(0, '127.0.0.1', res));
+  const { port } = srv.address();
+  await new Promise((res) => srv.close(res)); // 閉じた port
+  const registry = `http://127.0.0.1:${port}/`;
+  for (const extra of [[], ['--dry-run']]) {
+    const started = Date.now();
+    const r = await run(['verdaccio-publish', ...extra, dir], { PUBLISH_VERDACCIO_REGISTRY: registry, FAKE_PING_REAL: '1' });
+    assert.ok(Date.now() - started < 5000, '数秒以内に返る');
+    assert.equal(r.status, EXIT.FAIL, r.stderr);
+    assert.equal(r.json.ok, false);
+    assert.equal(r.json.registry, registry);
+    assert.match(r.json.error, /registry に届かない/);
+    assert.match(r.json.error, /ローカルネットワーク制限/);
+  }
+  assert.equal(H.readRecords(record).length, 0, 'publish の stub は呼ばれない');
+  assert.equal(H.readPings(record).length, 2, 'ping は publish と dry-run の 2 回');
+});
+
+test('verdaccio-publish: 届く registry（偽の server）では今のまま publish を呼ぶ', async (t) => {
+  const { work, record, run } = setup(t);
+  const dir = makePackage(work, { name: 'example-pkg', version: '1.0.0' });
+  const srv = http.createServer((req, res) => res.end('{}'));
+  await new Promise((res) => srv.listen(0, '127.0.0.1', res));
+  t.after(() => new Promise((res) => srv.close(res)));
+  const registry = `http://127.0.0.1:${srv.address().port}/`;
+  const r = await run(['verdaccio-publish', dir], { PUBLISH_VERDACCIO_REGISTRY: registry, FAKE_PING_REAL: '1' });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.json.ok, true);
+  const recs = H.readRecords(record);
+  assert.equal(recs.length, 1);
+  assert.deepEqual(recs[0].args, ['publish', dir, '--registry', registry, '--json']);
 });
 
 test('npm-publish: 失敗の message と環境の秘密は伏せる・使い方の誤り・publishConfig の食い違い', async (t) => {

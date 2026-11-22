@@ -11,6 +11,9 @@ const { which, run, firstLines } = require('./proc');
 const NPMJS_REGISTRY = 'https://registry.npmjs.org/';
 const ACCESS = new Set(['public', 'restricted']);
 const TAG_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+// publish の前に registry へ届くかを確かめる上限。届かない時に npm の retry（3 回・約 70 秒）を待たせない。
+const PING_FETCH_TIMEOUT_MS = 10_000;
+const PING_PROCESS_TIMEOUT_MS = PING_FETCH_TIMEOUT_MS + 5_000;
 
 function checkOptions(values) {
   if (values.tag !== undefined && !TAG_RE.test(values.tag)) throw new UsageError(`tag の形が不正: ${values.tag}`);
@@ -60,6 +63,27 @@ function parseJson(text) {
 }
 
 /**
+ * registry に短い上限（retry 無し）で届くかを確かめる（npm ping）。届けば null、届かなければ理由の文字列。
+ * launchd 常駐の process は macOS のローカルネットワーク制限で社内の registry に届かない事があり、
+ * その時 npm publish は retry で長く待つうえ、dry-run では失敗を握りつぶして終了 0 を返す。
+ */
+async function checkReachable(npm, registry, { env, cwd, redact }) {
+  const r = await run(
+    npm,
+    ['ping', '--registry', registry, '--fetch-retries=0', `--fetch-timeout=${PING_FETCH_TIMEOUT_MS}`],
+    { env, cwd, timeout: PING_PROCESS_TIMEOUT_MS },
+  );
+  if (!r.error && r.status === 0 && !r.timedOut) return null;
+  const why = r.timedOut ? '時間切れ' : r.error ? r.error.code || r.error.message : `npm ping が終了 code ${r.status}`;
+  const detail = firstLines(redact(r.stderr || r.stdout));
+  return redact(
+    `registry に届かない（${why}）: ${registry}。publish は走らせていない。` +
+      'launchd 常駐の process では macOS のローカルネットワーク制限で届かない可能性がある。' +
+      (detail ? '\n' + detail : ''),
+  );
+}
+
+/**
  * @param {object} values 引数
  * @param {{ registry: string, label: string, env, stderr, redact, cwd? }} ctx
  */
@@ -89,7 +113,7 @@ async function publishPackage(values, ctx) {
   ctx.stderr.write(
     `publish: ${ctx.label}: ${name || path.basename(t.abs)}${version ? '@' + version : ''} -> ${registry}${values.dryRun ? '（dry-run）' : ''}\n`,
   );
-  const r = await run(npm, args, { env, cwd: t.kind === 'dir' ? t.abs : path.dirname(t.abs) });
+  const cwd = t.kind === 'dir' ? t.abs : path.dirname(t.abs);
   const base = {
     registry,
     target: t.abs,
@@ -100,6 +124,10 @@ async function publishPackage(values, ctx) {
     access: values.access ?? null,
     dryRun: values.dryRun,
   };
+  // publish（dry-run 含む）の前に registry へ届くかを確かめる。届かなければ publish を走らせない。
+  const unreachable = await checkReachable(npm, registry, { env, cwd, redact });
+  if (unreachable) return { exitCode: 1, result: { ok: false, ...base, error: unreachable } };
+  const r = await run(npm, args, { env, cwd });
   if (r.error || r.status !== 0 || r.timedOut) {
     const why = r.timedOut ? '時間切れ' : r.error ? r.error.code || r.error.message : `npm が終了 code ${r.status}`;
     const detail = firstLines(redact(r.stderr || r.stdout));

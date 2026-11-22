@@ -1,6 +1,6 @@
 # superbash-bantou
 
-[superbash](https://github.com/agent-hand/superbash) の toolset（0.2.0）。mac でしか出来ない build（Tauri）と codesign の署名（macbuild の 3 command）、npm・verdaccio への publish と GitHub・Gitea の repo・release の作成（publish の 6 command）を、MCP の道具 `superbash-command` の command として出す。
+[superbash](https://github.com/agent-hand/superbash) の toolset（0.2.1）。mac でしか出来ない build（Tauri）と codesign の署名（macbuild の 3 command）、npm・verdaccio への publish と GitHub・Gitea の repo・release の作成（publish の 6 command）を、MCP の道具 `superbash-command` の command として出す。
 
 署名の identity・updater の鍵・その password・公証の資格は **host の設定** から読む。道具の引数にも出力にも log にも出さない。
 
@@ -128,6 +128,13 @@ Tauri の build は数分から十数分かかる。superbash の既定の時間
 - GitHub: host の gh の認証をそのまま使う。
 - Gitea: token は実行時に `git credential fill`（stdin に protocol・host は `giteaUrl` から、username は `giteaUsername`）で取り出して API の `Authorization` に渡す。host の git の credential helper に token が入っている必要がある。token は stdout・stderr・error message に出さない（`lib/secrets.js` が値と形で伏せる）。API の redirect は追わない。
 - 伏せ: 環境の名前が token・password・secret・credential・auth らしい変数の値、npm・GitHub の token の形、`_authToken=`、`Authorization:`、URL の `user:pass@`、取り出した Gitea の token。
+
+### registry に届く事の確かめ・長い呼び出し（publish）
+
+- launchd 常駐の superbash から動く npm は、macOS のローカルネットワーク制限で社内の registry に届かない事がある（`EHOSTUNREACH`）。npm は 3 回試して約 70 秒かかり、dry-run では失敗を握りつぶして終了 0 を返す。つまり **dry-run の成功は、registry に届く事も認証も保証しない**。
+- 手当て: `npm-publish`・`verdaccio-publish` は、publish（dry-run 含む）の前に `npm ping --registry <url> --fetch-retries=0 --fetch-timeout=10000` で registry に届くかを確かめる。届かなければ publish を走らせず、すぐ `{ "ok": false, "error": ... }`（届かない事と、ローカルネットワーク制限の可能性）を返して終了 code 1。届く時は今のまま publish する（publish 本体の retry 設定は変えない）。この確かめが保証するのは「届く事」だけで、認証は保証しない。
+- Claude Code は http の MCP の 1 回の呼び出しを既定 60 秒で打ち切る（mcp の設定の `timeout` で延ばせる。進み具合の通知では延びない）。長くなりうる command は `run_in_background: true` で呼ぶ。
+- 打ち切られても command は最後まで走り続ける。「時間切れ」と出ても公開済みの事があるので、**本番 publish を呼び直す前に、結果（registry に出たか）を確かめる**（二重の publish を避ける）。
 
 ### host の設定（publish）
 

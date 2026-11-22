@@ -1,6 +1,6 @@
 {
   "name": "superbash-bantou",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "superbash の toolset: mac でしか出来ない build（Tauri）と codesign の署名、npm・verdaccio への publish と GitHub・Gitea の repo・release の作成の窓口",
   "license": "MIT",
   "repository": {

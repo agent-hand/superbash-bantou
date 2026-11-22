@@ -144,10 +144,10 @@
     },
     {
       "name": "npm-publish",
-      "description": "指定の tarball か dir を npmjs（https://registry.npmjs.org/ を --registry で明示）に publish する（npm publish）。認証は host の npm login（host の npm の設定）をそのまま使い、wrapper は token を読まない。package の publishConfig.registry が npmjs と違う時は publish しない。実際に公開されるので、dry-run で確かめてから使う。",
+      "description": "指定の tarball か dir を npmjs（https://registry.npmjs.org/ を --registry で明示）に publish する（npm publish）。認証は host の npm login（host の npm の設定）をそのまま使い、wrapper は token を読まない。package の publishConfig.registry が npmjs と違う時は publish しない。publish（dry-run 含む）の前に、registry に短い上限（10 秒・retry 無し）で届くか npm ping で確かめ、届かなければ publish せずすぐ ok:false（終了 code 1）を返す（launchd 常駐の process は macOS のローカルネットワーク制限で届かない事がある）。dry-run の成功は registry に届く事と認証を保証しない（この確かめは届く事だけを手当てする）。実際に公開されるので、dry-run で確かめてから使う。長くなりうるので run_in_background で呼ぶ。Claude Code の 1 回の呼び出しの上限（既定 60 秒、mcp 設定の timeout で延ばす）で打ち切られても command は走り続けるので、本番 publish を呼び直す前に registry に出たかを確かめる。",
       "category": "publish",
       "tool": "publish",
-      "version": "0.2.0",
+      "version": "0.2.1",
       "spec": {
         "subcommand": "npm-publish",
         "usage": "publish npm-publish [--tag <tag>] [--access <public|restricted>] [--dry-run] <target>",
@@ -194,10 +194,10 @@
     },
     {
       "name": "verdaccio-publish",
-      "description": "指定の tarball か dir を、host の設定の verdaccio の registry（verdaccioRegistry）に publish する。認証は host の npm login をそのまま使う。設定が無い時は終了 code 4。package の publishConfig.registry が設定の registry と違う時は publish しない。",
+      "description": "指定の tarball か dir を、host の設定の verdaccio の registry（verdaccioRegistry）に publish する。認証は host の npm login をそのまま使う。設定が無い時は終了 code 4。package の publishConfig.registry が設定の registry と違う時は publish しない。publish（dry-run 含む）の前に、registry に短い上限（10 秒・retry 無し）で届くか npm ping で確かめ、届かなければ publish せずすぐ ok:false（終了 code 1）を返す。dry-run の成功は registry に届く事と認証を保証しない（この確かめは届く事だけを手当てする）。長くなりうるので run_in_background で呼ぶ。打ち切られても command は走り続けるので、本番 publish を呼び直す前に registry に出たかを確かめる。",
       "category": "publish",
       "tool": "publish",
-      "version": "0.2.0",
+      "version": "0.2.1",
       "spec": {
         "subcommand": "verdaccio-publish",
         "usage": "publish verdaccio-publish [--tag <tag>] [--access <public|restricted>] [--dry-run] <target>",
@@ -247,7 +247,7 @@
       "description": "host の gh の CLI（gh repo create）で GitHub の repo を作る。認証は host の gh の認証をそのまま使う。公開範囲の既定は private。",
       "category": "publish",
       "tool": "publish",
-      "version": "0.2.0",
+      "version": "0.2.1",
       "spec": {
         "subcommand": "github-repo-create",
         "usage": "publish github-repo-create [--visibility <public|private|internal>] [--description <text>] <repo>",
@@ -292,7 +292,7 @@
       "description": "host の gh の CLI（gh release create）で GitHub の release を作る（tag・題・本文の file・target・draft・prerelease・asset の添付）。認証は host の gh の認証をそのまま使う。",
       "category": "publish",
       "tool": "publish",
-      "version": "0.2.0",
+      "version": "0.2.1",
       "spec": {
         "subcommand": "github-release-create",
         "usage": "publish github-release-create [--title <title>] [--notes-file <file>] [--target <ref>] [--draft] [--prerelease] [--assets <file,...>] <repo> <tag>",
@@ -362,7 +362,7 @@
       "description": "Gitea の REST API（/api/v1）を node の fetch から呼んで repo を作る（curl は使わない）。owner が host の設定の giteaUsername と同じなら user の repo、違えば organization の repo。token は実行時に git credential fill（protocol・host は giteaUrl から、username は giteaUsername）で取り出し、出力に出さない。公開範囲の既定は private。",
       "category": "publish",
       "tool": "publish",
-      "version": "0.2.0",
+      "version": "0.2.1",
       "spec": {
         "subcommand": "gitea-repo-create",
         "usage": "publish gitea-repo-create [--visibility <public|private>] [--description <text>] <repo>",
@@ -407,7 +407,7 @@
       "description": "Gitea の REST API（/api/v1）を node の fetch から呼んで release を作り、asset を添付する（curl は使わない）。token は実行時に git credential fill で取り出し、出力に出さない。asset の添付が途中で失敗した時は、release は作成済みのまま、url・uploaded・failedAsset を返す。",
       "category": "publish",
       "tool": "publish",
-      "version": "0.2.0",
+      "version": "0.2.1",
       "spec": {
         "subcommand": "gitea-release-create",
         "usage": "publish gitea-release-create [--title <title>] [--notes-file <file>] [--target <ref>] [--draft] [--prerelease] [--assets <file,...>] <repo> <tag>",
