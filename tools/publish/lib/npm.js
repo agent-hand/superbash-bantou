@@ -1,14 +1,15 @@
 'use strict';
-// npm-publish・verdaccio-publish: tarball か dir を指定の registry に publish する（npm publish を引数の配列で起動）。
+// npm publish: tarball か dir を registry に publish する（npm publish を引数の配列で起動）。
+// registry は呼ぶ時の --registry で受ける。無ければ npm 自身の設定のまま（宛先を持たない）。
 // 認証は host の npm の設定（npm login）をそのまま使う。token は読まない。
 
 const fs = require('node:fs');
 const path = require('node:path');
 
+const { normalizeUrl } = require('./common');
 const { EnvError, FailError, UsageError } = require('./errors');
 const { which, run, firstLines } = require('./proc');
 
-const NPMJS_REGISTRY = 'https://registry.npmjs.org/';
 const ACCESS = new Set(['public', 'restricted']);
 const TAG_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 // publish の前に registry へ届くかを確かめる上限。届かない時に npm の retry（3 回・約 70 秒）を待たせない。
@@ -64,20 +65,21 @@ function parseJson(text) {
 
 /**
  * registry に短い上限（retry 無し）で届くかを確かめる（npm ping）。届けば null、届かなければ理由の文字列。
+ * registry が null の時は --registry を付けず、npm 自身の設定の registry に対して確かめる。
  * launchd 常駐の process は macOS のローカルネットワーク制限で社内の registry に届かない事があり、
  * その時 npm publish は retry で長く待つうえ、dry-run では失敗を握りつぶして終了 0 を返す。
  */
 async function checkReachable(npm, registry, { env, cwd, redact }) {
   const r = await run(
     npm,
-    ['ping', '--registry', registry, '--fetch-retries=0', `--fetch-timeout=${PING_FETCH_TIMEOUT_MS}`],
+    ['ping', ...(registry ? ['--registry', registry] : []), '--fetch-retries=0', `--fetch-timeout=${PING_FETCH_TIMEOUT_MS}`],
     { env, cwd, timeout: PING_PROCESS_TIMEOUT_MS },
   );
   if (!r.error && r.status === 0 && !r.timedOut) return null;
   const why = r.timedOut ? '時間切れ' : r.error ? r.error.code || r.error.message : `npm ping が終了 code ${r.status}`;
   const detail = firstLines(redact(r.stderr || r.stdout));
   return redact(
-    `registry に届かない（${why}）: ${registry}。publish は走らせていない。` +
+    `registry に届かない（${why}）${registry ? ': ' + registry : '（npm 自身の設定の registry）'}。publish は走らせていない。` +
       'launchd 常駐の process では macOS のローカルネットワーク制限で届かない可能性がある。' +
       (detail ? '\n' + detail : ''),
   );
@@ -85,11 +87,13 @@ async function checkReachable(npm, registry, { env, cwd, redact }) {
 
 /**
  * @param {object} values 引数
- * @param {{ registry: string, label: string, env, stderr, redact, cwd? }} ctx
+ * @param {{ label: string, env, stderr, redact, cwd? }} ctx
  */
 async function publishPackage(values, ctx) {
-  const { registry, env, redact } = ctx;
+  const { env, redact } = ctx;
   checkOptions(values);
+  // --registry が無ければ null（npm 自身の設定のまま。--registry も scope の registry も渡さない）。
+  const registry = values.registry === undefined ? null : normalizeUrl(values.registry, '--registry').href;
   const t = resolveTarget(values.target, ctx.cwd || process.cwd());
   const npm = which('npm', env);
   if (!npm) throw new EnvError('npm が PATH に無い');
@@ -98,20 +102,22 @@ async function publishPackage(values, ctx) {
   const name = pkg && typeof pkg.name === 'string' ? pkg.name : null;
   const version = pkg && typeof pkg.version === 'string' ? pkg.version : null;
 
-  // package が別の registry を指していたら、指定の registry には出さない（誤って別の所に出さないため）。
+  // --registry を付けた時、package が別の registry を指していたら出さない（誤って別の所に出さないため）。
   const pcReg = pkg && pkg.publishConfig && pkg.publishConfig.registry;
-  if (typeof pcReg === 'string' && !sameRegistry(pcReg, registry)) {
+  if (registry && typeof pcReg === 'string' && !sameRegistry(pcReg, registry)) {
     throw new FailError('package の publishConfig.registry が指定の registry と違うので publish しない');
   }
 
-  const args = ['publish', t.abs, '--registry', registry, '--json'];
-  if (name && name.startsWith('@')) args.push(`--${name.split('/')[0]}:registry=${registry}`); // scope の registry の設定に負けない
+  const args = ['publish', t.abs];
+  if (registry) args.push('--registry', registry);
+  args.push('--json');
+  if (registry && name && name.startsWith('@')) args.push(`--${name.split('/')[0]}:registry=${registry}`); // scope の registry の設定に負けない
   if (values.tag !== undefined) args.push('--tag', values.tag);
   if (values.access !== undefined) args.push('--access', values.access);
   if (values.dryRun) args.push('--dry-run');
 
   ctx.stderr.write(
-    `publish: ${ctx.label}: ${name || path.basename(t.abs)}${version ? '@' + version : ''} -> ${registry}${values.dryRun ? '（dry-run）' : ''}\n`,
+    `publish: ${ctx.label}: ${name || path.basename(t.abs)}${version ? '@' + version : ''} -> ${registry || 'npm の設定の registry'}${values.dryRun ? '（dry-run）' : ''}\n`,
   );
   const cwd = t.kind === 'dir' ? t.abs : path.dirname(t.abs);
   const base = {
@@ -139,4 +145,4 @@ async function publishPackage(values, ctx) {
   return { exitCode: 0, result: { ok: true, ...base } };
 }
 
-module.exports = { publishPackage, NPMJS_REGISTRY };
+module.exports = { publishPackage };

@@ -1,6 +1,6 @@
 'use strict';
 // publish の test の共通: 偽の npm・gh（PATH の先に置く stub）、127.0.0.1 の偽の Gitea API server、
-// 偽の git credential helper、偽の HOME。実際の npmjs・verdaccio・GitHub・Gitea には何も書かない。
+// 偽の git credential helper、偽の HOME。実際の npmjs・GitHub・Gitea には何も書かない。
 
 const { spawn } = require('node:child_process');
 const fs = require('node:fs');
@@ -20,7 +20,7 @@ const FAKE = Object.freeze({
   envSecret: 'env-secret-value-xyz',
 });
 
-// 偽の npm・gh。起動された argv・cwd・環境（NPM_*・GH_*・PUBLISH_*）を FAKE_RECORD の dir に書く。
+// 偽の npm・gh。起動された argv・cwd・環境（NPM_*・GH_*）を FAKE_RECORD の dir に書く。
 // FAKE_STDOUT / FAKE_STDERR を出し、FAKE_EXIT で終了 code を決める。gh は既定で URL を出す。
 const FAKE_STUB = `#!/usr/bin/env node
 'use strict';
@@ -39,12 +39,12 @@ if (name === 'npm' && args[0] === 'ping') {
   req.on('error', (e) => { process.stderr.write('npm error code ' + (e.code || 'ERR') + '\\n'); process.exit(1); });
 } else {
 if (env.FAKE_RECORD) {
-  const keep = Object.fromEntries(Object.entries(env).filter(([k]) => /^(NPM_|GH_|GITHUB_|PUBLISH_)/.test(k)));
+  const keep = Object.fromEntries(Object.entries(env).filter(([k]) => /^(NPM_|GH_|GITHUB_)/.test(k)));
   fs.writeFileSync(path.join(env.FAKE_RECORD, name + '-' + process.pid + '.json'), JSON.stringify({ name, args, cwd: process.cwd(), env: keep }));
 }
 if (env.FAKE_STDOUT) process.stdout.write(env.FAKE_STDOUT + '\\n');
-else if (name === 'gh' && args[0] === 'repo') console.log('https://github.com/' + args[2]);
-else if (name === 'gh' && args[0] === 'release') console.log('https://github.com/' + args.find((a) => a.startsWith('--repo=')).slice(7) + '/releases/tag/' + args[2]);
+else if (name === 'gh' && args[0] === 'repo' && !env.FAKE_NO_URL) console.log('https://gh.example.invalid/' + args[2]);
+else if (name === 'gh' && args[0] === 'release' && !env.FAKE_NO_URL) console.log('https://gh.example.invalid/' + args.find((a) => a.startsWith('--repo=')).slice(7) + '/releases/tag/' + args[2]);
 if (env.FAKE_STDERR) process.stderr.write(env.FAKE_STDERR + '\\n');
 process.exit(Number(env.FAKE_EXIT || 0));
 }
@@ -83,7 +83,7 @@ if (process.argv[2] !== 'get') process.exit(0);
 const input = fs.readFileSync(0, 'utf8');
 if (process.env.FAKE_CRED_RECORD) fs.appendFileSync(process.env.FAKE_CRED_RECORD, JSON.stringify(input) + '\\n');
 if (process.env.FAKE_CRED_NONE) process.exit(0);
-process.stdout.write('password=' + process.env.FAKE_CRED_VALUE + '\\n');
+process.stdout.write('username=example-user\\npassword=' + process.env.FAKE_CRED_VALUE + '\\n');
 `;
 
 /** 偽の HOME（.gitconfig で偽の credential helper だけを指す）。{ home, helper } */
@@ -155,6 +155,7 @@ async function startFakeGitea({ token, handler } = {}) {
       const u = new URL(req.url, 'http://x');
       const origin = `http://${req.headers.host}`;
       let m;
+      if (req.method === 'GET' && u.pathname === '/api/v1/user') return send(200, { login: FAKE.giteaUser });
       if (req.method === 'POST' && (u.pathname === '/api/v1/user/repos' || /^\/api\/v1\/orgs\/[^/]+\/repos$/.test(u.pathname))) {
         const j = JSON.parse(body.toString('utf8'));
         const owner = u.pathname === '/api/v1/user/repos' ? FAKE.giteaUser : u.pathname.split('/')[4];

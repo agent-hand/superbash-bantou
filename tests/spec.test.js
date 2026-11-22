@@ -1,5 +1,5 @@
 'use strict';
-// spec（.manifest/toolconfig.json）と CLI（引数の表・help）の整合。
+// spec（.manifest/toolconfig.json。入れ子）と CLI（引数の表・help）の整合。
 
 const assert = require('node:assert/strict');
 const { spawnSync } = require('node:child_process');
@@ -10,21 +10,34 @@ const test = require('node:test');
 const { COMMANDS } = require('../tools/macbuild/lib/commands');
 const { EXIT } = require('../tools/macbuild/lib/errors');
 const { ROOT, MAIN, MANIFEST, makeTmp, rmTmp, cleanEnv, runCli } = require('./helpers/env');
+const { leaves } = require('./helpers/spec-in');
 
 const manifest = JSON.parse(fs.readFileSync(MANIFEST, 'utf8'));
-const macbuildCommands = manifest.commands.filter((c) => c.tool === 'macbuild');
+const macbuildTops = manifest.commands.filter((c) => c.tool === 'macbuild');
+const macbuildLeaves = leaves(manifest, 'macbuild');
 const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
 
 test('package.json は toolset の形（bin を並べない・files は .manifest/ と tools/）', () => {
   assert.equal(pkg.name, 'superbash-bantou');
-  assert.equal(pkg.version, '0.2.1');
+  assert.equal(pkg.version, '0.3.0');
   assert.equal(pkg.license, 'MIT');
   assert.equal(pkg.repository.url, 'git+https://github.com/agent-hand/superbash-bantou.git');
   assert.deepEqual(pkg.files, ['.manifest/', 'tools/']);
   assert.equal(pkg.bin, undefined);
 });
 
-test('toolconfig.json の tools と commands の形', () => {
+/** 要素を上から順にたどる（並びの名前つき）。 */
+function walkAll(commands) {
+  const out = [];
+  const walk = (node, names, top) => {
+    out.push({ node, names, top, depth: names.length });
+    for (const c of node.subcommands || []) walk(c, [...names, c.name], top);
+  };
+  for (const top of commands) walk(top, [top.name], top);
+  return out;
+}
+
+test('toolconfig.json の tools と、入れ子の commands の木', () => {
   assert.equal(manifest.name, 'superbash-bantou');
   assert.deepEqual(Object.keys(manifest.tools), ['macbuild', 'publish']);
   for (const tool of ['macbuild', 'publish']) {
@@ -34,83 +47,116 @@ test('toolconfig.json の tools と commands の形', () => {
     assert.match(fs.readFileSync(entry, 'utf8'), /^#!\/usr\/bin\/env node\n/);
   }
 
+  // 上の要素と、spec.subcommand（argv の頭の語）
   assert.deepEqual(
-    manifest.commands.map((c) => c.name),
+    manifest.commands.map((c) => [c.name, c.tool, c.spec && c.spec.subcommand]),
     [
-      'macbuild-info',
-      'macbuild-tauri',
-      'macbuild-sign',
-      'npm-publish',
-      'verdaccio-publish',
-      'github-repo-create',
-      'github-release-create',
-      'gitea-repo-create',
-      'gitea-release-create',
+      ['macbuild', 'macbuild', undefined],
+      ['npm', 'publish', 'npm'],
+      ['github', 'publish', 'github'],
+      ['gitea', 'publish', 'gitea'],
     ],
   );
-  for (const c of manifest.commands) {
-    assert.ok(['macbuild', 'publish'].includes(c.tool), c.name);
-    assert.equal(typeof c.version, 'string', c.name);
-    assert.equal(typeof c.description, 'string', c.name);
-    for (const k of ['subcommand', 'usage', 'in', 'out']) assert.ok(c.spec[k] !== undefined, `${c.name} に spec.${k} が無い`);
-    for (const code of Object.keys(c.spec.out.exitCodes)) {
-      assert.ok(Object.values(EXIT).includes(Number(code)), `${c.name} の終了 code ${code} を CLI が使わない`);
+  // 呼ぶ名前（葉の並びの名前）の一覧。古い名前（macbuild-info・npm-publish など）と verdaccio は無い。
+  assert.deepEqual(
+    [...leaves(manifest, 'macbuild'), ...leaves(manifest, 'publish')].map((l) => l.name),
+    [
+      'macbuild info',
+      'macbuild tauri',
+      'macbuild sign',
+      'npm publish',
+      'github repo create',
+      'github release create',
+      'gitea repo create',
+      'gitea release create',
+    ],
+  );
+  assert.ok(!/macbuild-|npm-publish|verdaccio|-create/.test(JSON.stringify(manifest.commands)));
+
+  for (const { node, names, depth } of walkAll(manifest.commands)) {
+    const name = names.join(' ');
+    assert.ok(!/\s/.test(node.name), `name に空白: ${name}`);
+    assert.equal(typeof node.description, 'string', name);
+    if (depth === 1) {
+      assert.ok(['macbuild', 'publish'].includes(node.tool), name);
+      assert.equal(node.version, '0.3.0', name);
+    } else {
+      assert.equal(node.tool, undefined, `${name}: tool は上の要素だけ`);
+      assert.equal(node.version, undefined, `${name}: version は上の要素だけ`);
+      assert.equal(node.spec && node.spec.subcommand, undefined, `${name}: spec.subcommand は上の要素だけ`);
+    }
+    const kids = node.subcommands || [];
+    assert.equal(new Set(kids.map((c) => c.name)).size, kids.length, `${name}: 兄弟の name が重なる`);
+    if (kids.length > 0) {
+      assert.equal(node.spec && node.spec.in, undefined, `${name}: 群は spec.in を持たない`);
+    } else {
+      for (const k of ['usage', 'in', 'out']) assert.ok(node.spec && node.spec[k] !== undefined, `${name} に spec.${k} が無い`);
+      for (const code of Object.keys(node.spec.out.exitCodes)) {
+        assert.ok(Object.values(EXIT).includes(Number(code)), `${name} の終了 code ${code} を CLI が使わない`);
+      }
     }
   }
 });
 
-test('CLI の引数の表は spec.in と同じ（名前・flag・型・順・optional）', () => {
-  const subs = macbuildCommands.map((c) => c.spec.subcommand);
-  assert.deepEqual([...subs].sort(), Object.keys(COMMANDS).sort(), 'CLI の副 command と spec の subcommand');
-  for (const c of macbuildCommands) {
-    const def = COMMANDS[c.spec.subcommand];
-    assert.equal(def.name, c.name);
-    const specOptions = Object.entries(c.spec.in.options || {}).map(([key, o]) => ({ key, flag: o.flag, type: o.type }));
-    assert.deepEqual(def.options, specOptions, `${c.name} の options`);
-    const specPositionals = (c.spec.in.positionals || []).map((p) => ({
+test('CLI の引数の表は葉の spec.in と同じ（並びの名前・argv の頭・flag・型・順・optional）', () => {
+  assert.deepEqual(
+    macbuildLeaves.map((l) => l.head.join(' ')).sort(),
+    Object.keys(COMMANDS).sort(),
+    'CLI の副 command と葉の argv の頭',
+  );
+  for (const l of macbuildLeaves) {
+    const def = COMMANDS[l.head.join(' ')];
+    assert.equal(def.name, l.name);
+    const specOptions = Object.entries(l.node.spec.in.options || {}).map(([key, o]) => ({ key, flag: o.flag, type: o.type }));
+    assert.deepEqual(def.options, specOptions, `${l.name} の options`);
+    const specPositionals = (l.node.spec.in.positionals || []).map((p) => ({
       name: p.name,
       type: p.type,
       optional: Boolean(p.optional),
     }));
-    assert.deepEqual(def.positionals, specPositionals, `${c.name} の positionals`);
+    assert.deepEqual(def.positionals, specPositionals, `${l.name} の positionals`);
   }
 });
 
-test('usage は副 command・すべての flag・positional を書いている', () => {
-  for (const c of macbuildCommands) {
-    const { usage } = c.spec;
-    assert.ok(usage.startsWith(`macbuild ${c.spec.subcommand}`), usage);
-    for (const o of Object.values(c.spec.in.options || {})) assert.ok(usage.includes(o.flag), `${usage} に ${o.flag}`);
-    for (const p of c.spec.in.positionals || []) assert.ok(usage.includes(`<${p.name}>`), `${usage} に <${p.name}>`);
+test('usage は葉の argv の頭・すべての flag・positional を書いている', () => {
+  for (const l of macbuildLeaves) {
+    const { usage } = l.node.spec;
+    assert.ok(usage.startsWith(`macbuild ${l.head.join(' ')}`), usage);
+    for (const o of Object.values(l.node.spec.in.options || {})) assert.ok(usage.includes(o.flag), `${usage} に ${o.flag}`);
+    for (const p of l.node.spec.in.positionals || []) assert.ok(usage.includes(`<${p.name}>`), `${usage} に <${p.name}>`);
   }
 });
 
-test('help は spec の内容を出す（全体・名前・副 command）', () => {
+test('help は定義の内容を出す（全体・並び・群。`macbuild help [<並び>]`）', () => {
   const home = makeTmp();
   try {
     const env = cleanEnv(home);
     const all = runCli(['help'], { env });
     assert.equal(all.status, 0, all.stderr);
     assert.equal(all.json.tool, 'macbuild');
-    assert.deepEqual(all.json.commands, macbuildCommands);
+    assert.deepEqual(all.json.commands, macbuildTops);
 
-    for (const c of macbuildCommands) {
-      for (const key of [c.name, c.spec.subcommand]) {
-        const one = runCli(['help', key], { env });
+    // 並びは `help macbuild tauri` でも `help tauri`（上の要素に spec.subcommand が無い）でもよい。
+    for (const l of macbuildLeaves) {
+      for (const words of [l.name.split(' '), l.head]) {
+        const one = runCli(['help', ...words], { env });
         assert.equal(one.status, 0, one.stderr);
-        assert.deepEqual(one.json, c);
+        assert.deepEqual(one.json, l.node);
       }
     }
+    assert.deepEqual(runCli(['help', 'macbuild'], { env }).json, macbuildTops[0], '群も引ける');
+    assert.deepEqual(runCli(['help', 'macbuild tauri'], { env }).json, macbuildLeaves[1].node, '1 つの引数に空白で並べてもよい');
     assert.deepEqual(runCli([], { env }).json, all.json, '引数無しは help');
-    const bad = runCli(['help', 'nope'], { env });
-    assert.equal(bad.status, EXIT.USAGE);
+    for (const words of [['nope'], ['macbuild', 'nope'], ['info', 'extra'], ['macbuild-info'], ['macbuild-tauri']]) {
+      assert.equal(runCli(['help', ...words], { env }).status, EXIT.USAGE, words.join(' '));
+    }
   } finally {
     rmTmp(home);
   }
 });
 
 test('entry は shebang で直に起動できる（wrapper と同じ起動の形）', () => {
-  const r = spawnSync(MAIN, ['help', 'info'], { encoding: 'utf8' });
+  const r = spawnSync(MAIN, ['help', 'macbuild', 'info'], { encoding: 'utf8' });
   assert.equal(r.status, 0, r.stderr);
-  assert.equal(JSON.parse(r.stdout).name, 'macbuild-info');
+  assert.equal(JSON.parse(r.stdout).name, 'info');
 });

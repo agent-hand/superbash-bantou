@@ -9,51 +9,52 @@ const codesign = require('../tools/macbuild/lib/codesign');
 const { parse } = require('../tools/macbuild/lib/commands');
 const { UsageError, EnvError, EXIT } = require('../tools/macbuild/lib/errors');
 const tauri = require('../tools/macbuild/lib/tauri');
-const { buildArgv } = require('./helpers/spec-in');
+const { buildArgv, findLeaf } = require('./helpers/spec-in');
 const { MANIFEST, FAKE, makeTmp, rmTmp, cleanEnv, runCli } = require('./helpers/env');
 
 const manifest = JSON.parse(fs.readFileSync(MANIFEST, 'utf8'));
-const spec = (name) => manifest.commands.find((c) => c.name === name).spec;
+const leaf = (name) => findLeaf(manifest, 'macbuild', name);
 
 test('spec.in の規則で組んだ argv', () => {
-  assert.deepEqual(buildArgv(spec('macbuild-info'), {}), ['info']);
-  assert.deepEqual(buildArgv(spec('macbuild-tauri'), { project: 'app' }), ['tauri', 'app']);
+  assert.deepEqual(buildArgv(leaf('macbuild info'), {}), ['info']);
+  assert.deepEqual(buildArgv(leaf('macbuild tauri'), { project: 'app' }), ['tauri', '--', 'app']);
   assert.deepEqual(
-    buildArgv(spec('macbuild-tauri'), {
+    buildArgv(leaf('macbuild tauri'), {
       project: 'app',
       targetDir: 'out',
       debug: true,
       bundles: 'app,dmg',
       target: 'aarch64-apple-darwin',
     }),
-    ['tauri', '--target', 'aarch64-apple-darwin', '--bundles', 'app,dmg', '--debug', '--target-dir', 'out', 'app'],
+    ['tauri', '--target', 'aarch64-apple-darwin', '--bundles', 'app,dmg', '--debug', '--target-dir', 'out', '--', 'app'],
   );
-  assert.deepEqual(buildArgv(spec('macbuild-tauri'), { project: 'app', debug: false }), ['tauri', 'app']);
-  assert.deepEqual(buildArgv(spec('macbuild-sign'), { path: 'X.app' }), ['sign', 'X.app']);
-  assert.deepEqual(buildArgv(spec('macbuild-sign'), { path: 'X.app', noTimestamp: true, entitlements: 'e.plist' }), [
+  assert.deepEqual(buildArgv(leaf('macbuild tauri'), { project: 'app', debug: false }), ['tauri', '--', 'app']);
+  assert.deepEqual(buildArgv(leaf('macbuild sign'), { path: 'X.app' }), ['sign', '--', 'X.app']);
+  assert.deepEqual(buildArgv(leaf('macbuild sign'), { path: 'X.app', noTimestamp: true, entitlements: 'e.plist' }), [
     'sign',
     '--entitlements',
     'e.plist',
     '--no-timestamp',
+    '--',
     'X.app',
   ]);
 });
 
 test('組んだ argv を CLI が同じ値に読み戻す', () => {
   const cases = [
-    ['macbuild-info', {}],
-    ['macbuild-tauri', { project: 'app' }],
-    ['macbuild-tauri', { project: 'app', target: 'x86_64-apple-darwin', bundles: 'dmg', debug: true, targetDir: '/t/x' }],
-    ['macbuild-tauri', { project: 'a b;$(id)`id`*', target: '--debug' }],
-    ['macbuild-sign', { path: "it's \"quoted\" & spaced.app", entitlements: 'e.plist' }],
-    ['macbuild-sign', { path: 'X.app', noTimestamp: true }],
+    ['macbuild info', {}],
+    ['macbuild tauri', { project: 'app' }],
+    ['macbuild tauri', { project: 'app', target: 'x86_64-apple-darwin', bundles: 'dmg', debug: true, targetDir: '/t/x' }],
+    ['macbuild tauri', { project: 'a b;$(id)`id`*', target: '--debug' }],
+    ['macbuild sign', { path: "it's \"quoted\" & spaced.app", entitlements: 'e.plist' }],
+    ['macbuild sign', { path: 'X.app', noTimestamp: true }],
   ];
   for (const [name, args] of cases) {
-    const s = spec(name);
-    const got = parse(buildArgv(s, args));
-    assert.equal(got.subcommand, s.subcommand);
+    const l = leaf(name);
+    const got = parse(buildArgv(l, args));
+    assert.equal(got.subcommand, l.head.join(' '));
     const expected = { ...args };
-    for (const [key, o] of Object.entries(s.in.options)) {
+    for (const [key, o] of Object.entries(l.node.spec.in.options)) {
       if (o.type === 'boolean' && expected[key] === undefined) expected[key] = false;
     }
     assert.deepEqual(got.values, expected, name);
@@ -70,7 +71,6 @@ test('使い方の誤りは UsageError（終了 code 2）', () => {
     ['sign'],
     ['info', 'extra'],
     ['nope'],
-    ['help', 'a', 'b'],
   ];
   for (const argv of bad) {
     assert.throws(() => parse(argv), (e) => e instanceof UsageError && e.exitCode === EXIT.USAGE, argv.join(' '));
@@ -85,11 +85,17 @@ test('使い方の誤りは UsageError（終了 code 2）', () => {
   }
 });
 
-test('`--` の後と最初の positional の後は positional（`-` で始まる positional は既知の制限）', () => {
+test('`--`（options の後・positionals の前）の後と最初の positional の後は positional。`-` で始まる positional も渡せる', () => {
   assert.deepEqual(parse(['sign', '--', '--entitlements']).values, { path: '--entitlements', noTimestamp: false });
   assert.deepEqual(parse(['tauri', '--', '-app']).values, { project: '-app', debug: false });
-  // superbash は `--` を入れないので、`-` で始まる positional は option と読まれて誤りになる（README の既知の制限）。
-  assert.throws(() => parse(buildArgv(spec('macbuild-tauri'), { project: '-app' })), UsageError);
+  // superbash（0.2.0 以上）は positionals の前に `--` を入れるので、`-` で始まる positional も option と読まれない。
+  assert.deepEqual(parse(buildArgv(leaf('macbuild tauri'), { project: '-app', debug: true })).values, { project: '-app', debug: true });
+  assert.deepEqual(parse(buildArgv(leaf('macbuild sign'), { path: '-X.app', noTimestamp: true })).values, {
+    path: '-X.app',
+    noTimestamp: true,
+  });
+  // `--` が無ければ、`-` で始まる値は option と読まれて誤りになる。
+  assert.throws(() => parse(['tauri', '-app']), UsageError);
 });
 
 test('Tauri の CLI に渡す argv', () => {

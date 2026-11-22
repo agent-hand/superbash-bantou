@@ -1,5 +1,5 @@
 'use strict';
-// github-repo-create・github-release-create: host の gh の CLI を引数の配列で起動する。
+// github repo create・github release create: host の gh の CLI を引数の配列で起動する。
 // 認証は host の gh の認証をそのまま使う（token は読まない・渡さない）。
 
 const common = require('./common');
@@ -24,28 +24,29 @@ function failure(r, what, ctx) {
   return ctx.redact(`${what}が失敗: ${why}${detail ? '\n' + detail : ''}`);
 }
 
+// gh が返した URL だけを出す。無ければ null（URL を自分で組まない）。
 function findUrl(r, ctx) {
   const m = r.stdout.match(URL_RE) || r.stderr.match(URL_RE);
   return m ? ctx.redact(m[0]) : null;
 }
 
-/** github-repo-create <owner/name> [--visibility public|private|internal] [--description d] */
+/** github repo create <owner/name> [--visibility public|private|internal] [--description d] */
 async function repoCreate(values, ctx) {
   const repo = common.parseRepo(values.repo);
   const visibility = common.checkVisibility(values.visibility, ['public', 'private', 'internal']);
   common.checkDescription(values.description);
   const args = ['repo', 'create', repo.full, `--${visibility}`];
   if (values.description !== undefined) args.push(`--description=${values.description}`);
-  ctx.stderr.write(`publish: github-repo-create: ${repo.full}（${visibility}）\n`);
+  ctx.stderr.write(`publish: github repo create: ${repo.full}（${visibility}）\n`);
   const r = await runGh(args, ctx);
   if (r.error || r.status !== 0 || r.timedOut) {
     return { exitCode: 1, result: { ok: false, repo: repo.full, visibility, error: failure(r, 'repo の作成', ctx) } };
   }
-  const url = findUrl(r, ctx) || `https://github.com/${repo.full}`;
+  const url = findUrl(r, ctx);
   return { exitCode: 0, result: { ok: true, repo: repo.full, visibility, url } };
 }
 
-/** github-release-create [options] <owner/name> <tag> */
+/** github release create [options] <owner/name> <tag> */
 async function releaseCreate(values, ctx) {
   const repo = common.parseRepo(values.repo);
   const tag = common.checkTag(values.tag);
@@ -58,13 +59,13 @@ async function releaseCreate(values, ctx) {
   if (values.target !== undefined) args.push(`--target=${values.target}`);
   if (values.draft) args.push('--draft');
   if (values.prerelease) args.push('--prerelease');
-  ctx.stderr.write(`publish: github-release-create: ${repo.full} ${tag}（asset ${assets.length} 件）\n`);
+  ctx.stderr.write(`publish: github release create: ${repo.full} ${tag}（asset ${assets.length} 件）\n`);
   const r = await runGh(args, ctx);
   const base = { repo: repo.full, tag, draft: values.draft, prerelease: values.prerelease, assets };
   if (r.error || r.status !== 0 || r.timedOut) {
     return { exitCode: 1, result: { ok: false, ...base, error: failure(r, 'release の作成', ctx) } };
   }
-  const url = findUrl(r, ctx) || `https://github.com/${repo.full}/releases/tag/${tag}`;
+  const url = findUrl(r, ctx);
   return { exitCode: 0, result: { ok: true, ...base, url } };
 }
 

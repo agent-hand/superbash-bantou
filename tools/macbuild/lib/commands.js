@@ -1,17 +1,19 @@
 'use strict';
-// CLI の副 command と引数の表。toolconfig.json の spec.in と同じ形・同じ順（test で照合する）。
-// superbash の wrapper は argv = [subcommand] + options（定義の順）+ positionals（定義の順、`--` 無し）で起動する。
+// CLI の副 command と引数の表。toolconfig.json の葉の spec.in と同じ形・同じ順（test で照合する）。
+// 表の key は argv の頭の語（空白で区切った並び。macbuild は上の要素に spec.subcommand が無いので 1 語）。
+// superbash の wrapper は argv = [上の要素の spec.subcommand] + [下のサブコマンドの名前] + options（定義の順）
+// + [`--`] + positionals（定義の順）で起動する。name は葉の並びの名前。
 
 const { UsageError } = require('./errors');
 
 const COMMANDS = Object.freeze({
   info: {
-    name: 'macbuild-info',
+    name: 'macbuild info',
     options: [],
     positionals: [],
   },
   tauri: {
-    name: 'macbuild-tauri',
+    name: 'macbuild tauri',
     options: [
       { key: 'target', flag: '--target', type: 'string' },
       { key: 'bundles', flag: '--bundles', type: 'string' },
@@ -21,7 +23,7 @@ const COMMANDS = Object.freeze({
     positionals: [{ name: 'project', type: 'string', optional: false }],
   },
   sign: {
-    name: 'macbuild-sign',
+    name: 'macbuild sign',
     options: [
       { key: 'entitlements', flag: '--entitlements', type: 'string' },
       { key: 'noTimestamp', flag: '--no-timestamp', type: 'boolean' },
@@ -45,7 +47,8 @@ function scalar(name, type, raw) {
 
 /**
  * argv を { subcommand, values } に読む。
- * options は最初の positional（か `--`）の前だけ読む（wrapper の並びと同じ）。それ以降はすべて positional。
+ * options は最初の positional か `--` の前だけ読む（wrapper の並びと同じ。`--` は options の後・positionals の前）。
+ * `--` の後はすべて positional（`-` で始まる値も）。
  */
 function parse(argv) {
   const [sub, ...rest] = argv;
@@ -53,8 +56,7 @@ function parse(argv) {
     return { subcommand: HELP, values: {} };
   }
   if (sub === HELP) {
-    if (rest.length > 1) throw new UsageError('使い方: macbuild help [<command>]');
-    return { subcommand: HELP, values: rest.length ? { command: rest[0] } : {} };
+    return { subcommand: HELP, values: rest.length ? { words: rest } : {} };
   }
   const def = COMMANDS[sub];
   if (!def) throw new UsageError(`未知の副 command: ${sub}（macbuild help で一覧）`);

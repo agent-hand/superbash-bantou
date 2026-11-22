@@ -3,22 +3,22 @@
 
 const { HELP, parse } = require('./commands');
 const { EXIT } = require('./errors');
-const { TOOL, toolCommands } = require('./manifest');
+const { TOOL, toolCommands, findElement } = require('./manifest');
 
 function writeJson(stream, value) {
   stream.write(JSON.stringify(value, null, 2) + '\n');
 }
 
-/** help: spec（toolconfig.json の定義）をそのまま出す。command は名前（macbuild-tauri）か副 command（tauri）。 */
+/** help: toolconfig.json の定義をそのまま出す。`macbuild help [<並び>]`（例 `macbuild help tauri`・`macbuild help macbuild tauri`）。 */
 function help(values, io) {
   const commands = toolCommands();
-  if (!values.command) {
-    writeJson(io.stdout, { tool: TOOL, usage: 'macbuild <subcommand> ...', commands });
+  if (!values.words) {
+    writeJson(io.stdout, { tool: TOOL, usage: 'macbuild <subcommand> ... | macbuild help [<並び>]', commands });
     return EXIT.OK;
   }
-  const c = commands.find((x) => x.name === values.command || (x.spec && x.spec.subcommand === values.command));
+  const c = findElement(commands, values.words);
   if (!c) {
-    io.stderr.write(`macbuild: 未知の command: ${values.command}\n`);
+    io.stderr.write(`macbuild: 未知の command: ${values.words.join(' ')}\n`);
     return EXIT.USAGE;
   }
   writeJson(io.stdout, c);

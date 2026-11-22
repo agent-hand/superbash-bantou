@@ -1,27 +1,35 @@
 'use strict';
-// gitea-repo-create・gitea-release-create: Gitea の REST API（/api/v1）を node の fetch から呼ぶ（curl は使わない）。
-// token は実行時に `git credential fill`（protocol・host は Gitea の URL から、username は host の設定）で取り出す。
+// gitea repo create・gitea release create: Gitea の REST API（/api/v1）を node の fetch から呼ぶ（curl は使わない）。
+// Gitea の URL は呼ぶ時の --url で受ける（host の設定に持たない）。
+// token は実行時に `git credential fill`（protocol・host は --url から）で取り出す。
 // 取り出した token は redactor に登録し、stdout・stderr・error message に出さない。
 
 const fs = require('node:fs');
 const path = require('node:path');
 
 const common = require('./common');
-const { EnvError } = require('./errors');
+const { EnvError, UsageError } = require('./errors');
 const { which, run } = require('./proc');
 
 const REQUEST_TIMEOUT_MS = 120_000;
+
+/** --url（必須）を { baseUrl（末尾 / 無し）, host（port 付き。credential の host）, protocol } にする。 */
+function giteaTarget(values) {
+  if (values.url === undefined || values.url === '') throw new UsageError('--url（Gitea の URL）が要る');
+  const u = common.normalizeUrl(values.url, '--url');
+  return { baseUrl: (u.origin + u.pathname).replace(/\/+$/, ''), host: u.host, protocol: u.protocol.slice(0, -1) };
+}
 
 /** git credential fill で token（password）を取る。取れなければ EnvError。 */
 async function fetchToken(cfg, ctx) {
   const git = which('git', ctx.env);
   if (!git) throw new EnvError('git が PATH に無い');
-  const input = `protocol=${cfg.protocol}\nhost=${cfg.host}\nusername=${cfg.username}\n\n`;
+  const input = `protocol=${cfg.protocol}\nhost=${cfg.host}\n\n`;
   const env = { ...ctx.env, GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never' };
   const r = await run(git, ['credential', 'fill'], { env, input, timeout: 30_000 });
   const m = r.stdout.match(/^password=(.*)$/m);
   if (r.status !== 0 || !m || m[1] === '') {
-    throw new EnvError(`git credential fill で ${cfg.host}（user ${cfg.username}）の token が取れない`);
+    throw new EnvError(`git credential fill で ${cfg.host} の token が取れない`);
   }
   ctx.addSecret(m[1]);
   return m[1];
@@ -68,41 +76,44 @@ function client(cfg, token, ctx) {
   };
 }
 
-async function prepare(ctx) {
-  const cfg = ctx.gitea;
+async function prepare(cfg, ctx) {
   const token = await fetchToken(cfg, ctx);
   return { cfg, api: client(cfg, token, ctx) };
 }
 
-/** gitea-repo-create <owner/name> [--visibility public|private] [--description d] */
+/** gitea repo create --url <url> <owner/name> [--visibility public|private] [--description d] */
 async function repoCreate(values, ctx) {
+  const target = giteaTarget(values);
   const repo = common.parseRepo(values.repo);
   const visibility = common.checkVisibility(values.visibility, ['public', 'private']);
   common.checkDescription(values.description);
-  const { cfg, api } = await prepare(ctx);
-  const own = repo.owner.toLowerCase() === cfg.username.toLowerCase();
-  const apiPath = own ? '/user/repos' : `/orgs/${encodeURIComponent(repo.owner)}/repos`;
+  const { api } = await prepare(target, ctx);
   const payload = { name: repo.name, private: visibility === 'private' };
   if (values.description !== undefined) payload.description = values.description;
-  ctx.stderr.write(`publish: gitea-repo-create: ${repo.full}（${visibility}）\n`);
+  ctx.stderr.write(`publish: gitea repo create: ${repo.full}（${visibility}）\n`);
   try {
+    // token の持ち主（GET /user の login）が owner と同じなら user の repo、違えば organization の repo。
+    const me = await api('GET', '/user');
+    const own = me && typeof me.login === 'string' && repo.owner.toLowerCase() === me.login.toLowerCase();
+    const apiPath = own ? '/user/repos' : `/orgs/${encodeURIComponent(repo.owner)}/repos`;
     const data = await api('POST', apiPath, { json: payload });
-    const url = data && typeof data.html_url === 'string' ? data.html_url : `${cfg.baseUrl}/${repo.full}`;
-    return { exitCode: 0, result: { ok: true, repo: repo.full, visibility, url: ctx.redact(url) } };
+    const url = data && typeof data.html_url === 'string' ? ctx.redact(data.html_url) : null;
+    return { exitCode: 0, result: { ok: true, repo: repo.full, visibility, url } };
   } catch (e) {
     if (!(e instanceof GiteaError)) throw e;
     return { exitCode: 1, result: { ok: false, repo: repo.full, visibility, error: e.message } };
   }
 }
 
-/** gitea-release-create [options] <owner/name> <tag> */
+/** gitea release create --url <url> [options] <owner/name> <tag> */
 async function releaseCreate(values, ctx) {
+  const target = giteaTarget(values);
   const repo = common.parseRepo(values.repo);
   const tag = common.checkTag(values.tag);
   common.checkTarget(values.target);
   const notes = common.readNotes(values.notesFile, ctx.cwd);
   const assets = common.resolveAssets(values.assets, ctx.cwd);
-  const { cfg, api } = await prepare(ctx);
+  const { api } = await prepare(target, ctx);
   const base = { repo: repo.full, tag, draft: values.draft, prerelease: values.prerelease, assets };
   const rel = `/repos/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.name)}/releases`;
   const payload = {
@@ -113,7 +124,7 @@ async function releaseCreate(values, ctx) {
     prerelease: values.prerelease,
   };
   if (values.target !== undefined) payload.target_commitish = values.target;
-  ctx.stderr.write(`publish: gitea-release-create: ${repo.full} ${tag}（asset ${assets.length} 件）\n`);
+  ctx.stderr.write(`publish: gitea release create: ${repo.full} ${tag}（asset ${assets.length} 件）\n`);
   let release;
   try {
     release = await api('POST', rel, { json: payload });
@@ -121,7 +132,7 @@ async function releaseCreate(values, ctx) {
     if (!(e instanceof GiteaError)) throw e;
     return { exitCode: 1, result: { ok: false, ...base, error: e.message } };
   }
-  const url = ctx.redact(release && typeof release.html_url === 'string' ? release.html_url : `${cfg.baseUrl}/${repo.full}/releases/tag/${tag}`);
+  const url = release && typeof release.html_url === 'string' ? ctx.redact(release.html_url) : null;
   const uploaded = [];
   for (const file of assets) {
     try {
