@@ -1128,11 +1128,11 @@ var npm = defineCommand({
 
 // tools/publish/src/main.ts
 var main = defineCommand({
-  meta: { name: "publish", version: "0.4.0", description: "\u516C\u958B\u306E\u64CD\u4F5C\uFF08npm \u306E publish\u3001GitHub\u30FBGitea \u306E repo \u3068 release \u306E\u4F5C\u6210\uFF09" },
+  meta: { name: "publish", version: "0.5.0", description: "\u516C\u958B\u306E\u64CD\u4F5C\uFF08npm \u306E publish\u3001GitHub\u30FBGitea \u306E repo \u3068 release \u306E\u4F5C\u6210\uFF09" },
   subCommands: { help, npm, github, gitea }
 });
 
-// tools/publish/src/cli.ts
+// tools/publish/src/module.ts
 function toRawArgs(argv) {
   const [first] = argv;
   if (first === void 0 || first === "-h" || first === "--help") return ["help"];
@@ -1140,14 +1140,23 @@ function toRawArgs(argv) {
   const { names, cmd, rest } = findLeaf(main, argv, "help \u3067\u4E00\u89A7");
   return [...names, ...normalizeArgv(cmd.args, rest)];
 }
-async function run2(argv) {
-  await runCommand(main, { rawArgs: toRawArgs(argv) });
-}
-run2(process.argv.slice(2)).catch((e) => {
-  const code = typeof e?.exitCode === "number" ? e.exitCode : e?.name === "CLIError" ? EXIT.USAGE : EXIT.FAIL;
-  const message = redact(String(e?.message ?? e));
-  process.stderr.write(`publish: ${message}
+async function run2(rawArgs) {
+  const before = process.exitCode;
+  process.exitCode = void 0;
+  try {
+    await runCommand(main, { rawArgs: toRawArgs(rawArgs) });
+    return Number(process.exitCode ?? EXIT.OK);
+  } catch (e) {
+    const code = typeof e?.exitCode === "number" ? e.exitCode : e?.name === "CLIError" ? EXIT.USAGE : EXIT.FAIL;
+    const message = redact(String(e?.message ?? e));
+    process.stderr.write(`publish: ${message}
 `);
-  if (code !== EXIT.USAGE) writeJson({ ok: false, error: message });
-  process.exitCode = code;
-});
+    if (code !== EXIT.USAGE) writeJson({ ok: false, error: message });
+    return code;
+  } finally {
+    process.exitCode = before;
+  }
+}
+
+// tools/publish/src/cli.ts
+process.exitCode = await run2(process.argv.slice(2));

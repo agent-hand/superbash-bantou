@@ -1,8 +1,10 @@
 # superbash-bantou
 
-[superbash](https://github.com/agent-hand/superbash) の toolset（0.4.0）。mac でしか出来ない build（Tauri）と codesign の署名（`macbuild` の下に `info`・`tauri`・`sign`）、npm の package の公開と GitHub・Gitea の repo・release の作成（`npm`・`github`・`gitea` の下のサブコマンド）を、MCP の道具 `superbash-command` の command として出す。
+[superbash](https://github.com/agent-hand/superbash) の toolset（0.5.0）。mac でしか出来ない build（Tauri）と codesign の署名（`macbuild` の下に `info`・`tauri`・`sign`）、npm の package の公開と GitHub・Gitea の repo・release の作成（`npm`・`github`・`gitea` の下のサブコマンド）を、MCP の道具 `superbash-command` の command として出す。
 
 **使える superbash の版: 0.2.0 以上。** 0.3.0 以降の manifest は入れ子のサブコマンド（superbash 0.2.0 で対応）で書いてあり、0.1.x は読めない（群に `spec` が無いので「形が不正」で止まるか、`subcommands` を黙って捨てる）。呼ぶ名前は `macbuild info` のように空白で区切った並び。
+
+0.5.0 は、busybox 化の module 対応を足した版（toolset の作法 5.3）。各 tool は `dist/cli.mjs`（入口）に加え、読み込んでも走らない module `dist/main.mjs` を出し、manifest の `tools.<名前>.module` が指す。module は `main`（citty の command）と `run(rawArgs: string[]): Promise<number>`（`runCommand` で呼び、使い方の誤りは 2・その他の誤りは 1 などの終了 code を返す）を export する。`cli.mjs` は `run(process.argv.slice(2))` の結果を終了 code にするだけ。呼ぶ名前・引数・出力・終了 code は 0.4.0 と同じ。module を知らない superbash（0.2.0）は今までどおり entry（`cli.mjs`）で動く。1 つの実行 file にはまとめない。
 
 0.4.0 は、command を TypeScript（[citty](https://github.com/unjs/citty)）で書き直し、配る前に 1 つの JS にまとめた版。呼ぶ名前・引数・出力・終了 code は 0.3.0 と同じ（entry が `main.js` から `dist/cli.mjs` に変わっただけ）。
 
@@ -21,11 +23,13 @@
 ```
 .manifest/toolconfig.json   定義（正本。入れ子）。上の要素 4 つ（macbuild・npm・github・gitea）、呼べる葉 8 つの spec
 tools/<名前>/src/main.ts    citty の定義（`export const main`。定義だけで、読み込んでも走らない）
-tools/<名前>/src/cli.ts     入口（`runCommand` で呼ぶ。使い方の誤りは終了 2。`-h` を値として紛れさせない）
+tools/<名前>/src/module.ts  module（`export { main }` と `export async function run(rawArgs)`。`runCommand` で呼び、終了 code を返す。使い方の誤りは 2。`-h` を値として紛れさせない）
+tools/<名前>/src/cli.ts     入口（`run(process.argv.slice(2))` の結果を終了 code にするだけ）
 tools/<名前>/src/command/   サブコマンド 1 つ 1 file（群は dir の index.ts。群は run を持たない）
 tools/<名前>/src/lib/       中身（伏せ・lock・codesign・gh・Gitea の REST・npm の呼び出し・到達の確かめ・引数の検査）
 tools/<名前>/dist/cli.mjs   build の結果（citty も入れた 1 file。shebang つき・実行の権限つき）← manifest の entry が指す
-scripts/build.mjs          src/cli.ts を dist/cli.mjs にまとめる（esbuild）
+tools/<名前>/dist/main.mjs  build の結果（citty も入れた 1 file。読み込んでも走らない。shebang なし）← manifest の module が指す
+scripts/build.mjs          src/cli.ts を dist/cli.mjs に、src/module.ts を dist/main.mjs にまとめる（esbuild）
 tests/                      node:test の test と、Tauri の最小の雛形（tests/fixtures/tauri-min）
 ```
 
@@ -212,15 +216,15 @@ command は TypeScript で書き、配る前に `tools/<名前>/dist/cli.mjs` �
 
 ```
 npm ci
-npm run build    # tools/macbuild/dist/cli.mjs と tools/publish/dist/cli.mjs を作る
+npm run build    # tools/<macbuild・publish>/dist/cli.mjs と dist/main.mjs を作る
 npm test
 ```
 
-- まとめる道具は esbuild、定義と引数の読みは citty。どちらも `devDependencies`（superbash は `dependencies` だけを生成した package に写す）。citty は `dist/cli.mjs` の中に入っているので、実行の時は何も取りに行かない。`dist/` は node 18 で動く形（`target: node18`、ESM）。
+- まとめる道具は esbuild、定義と引数の読みは citty。どちらも `devDependencies`（superbash は `dependencies` だけを生成した package に写す）。citty は `dist/cli.mjs` と `dist/main.mjs` の中にそれぞれ入っているので、実行の時は何も取りに行かない。`dist/` は node 18 で動く形（`target: node18`、ESM）。
 - **`dist/` は repo に commit する**（git の repo の名前で指す使い方があるため）。source（`src/`）を変えたら `npm run build` をして `dist/` も commit する。CI（`.github/workflows/ci.yml`）は build し直して `git diff --exit-code` で差分が無い事を確かめる。
 - 構成は上の「構成」。manifest（`.manifest/toolconfig.json`）が正本で、citty の定義（名前・説明・引数）は手で同じに書き、`tests/citty.test.js` が `src/main.ts` を読み込んで `subCommands` を辿り、manifest と照合する（作法 6.2 (a)）。
-- 入口は citty の `runMain` を使わない（引数のどこかに `-h` があると usage を出して終了 0 で抜け、誤りの終了 code が全部 1 になるため）。`cli.ts` が argv を厳しく検査し（知らない option・2 度の option・値の無い option・多すぎる／足りない positional は終了 2。options の後に `--`、その後が positional）、`runCommand` に渡す。
-- test は、`src/lib/*.ts` を node の型の除去で直に読み込む（**node 22.18 以上**で test を回す）。command の実行の test は `dist/cli.mjs` を子 process で起動する。配る物（`dist/cli.mjs`）の動く node は 18 以上。
+- 入口（`run`。`module.ts`）は citty の `runMain` を使わない（引数のどこかに `-h` があると usage を出して終了 0 で抜け、誤りの終了 code が全部 1 になるため）。`run` が argv を厳しく検査し（知らない option・2 度の option・値の無い option・多すぎる／足りない positional は終了 2。options の後に `--`、その後が positional）、`runCommand` に渡す。
+- test は、`src/lib/*.ts` を node の型の除去で直に読み込む（**node 22.18 以上**で test を回す）。command の実行の test は `dist/cli.mjs` を子 process で起動する。`tests/module.test.js` は `dist/main.mjs` を `import()` して `run` の返す数を確かめ、`cli.mjs` と同じ結果になる事も見る。配る物（`dist/cli.mjs`）の動く node は 18 以上。
 
 ## 前提
 
