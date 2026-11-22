@@ -1,10 +1,17 @@
 {
   "$schema": "https://raw.githubusercontent.com/agent-hand/superbash/main/toolconfig.schema.json",
   "name": "superbash-bantou",
-  "description": "mac でしか出来ない build（Tauri）と codesign の署名の窓口。署名の identity・updater の鍵・公証の資格は host の設定から読み、道具の引数にも出力にも出さない。",
-  "owner": { "name": "superbash contributors" },
+  "description": "mac でしか出来ない build（Tauri）と codesign の署名の窓口、と公開操作（npm・verdaccio への publish、GitHub・Gitea の repo と release の作成）の窓口。署名の identity・updater の鍵・公証の資格・各 service の token は host の設定と認証から読み、道具の引数にも出力にも出さない。",
+  "owner": {
+    "name": "superbash contributors"
+  },
   "tools": {
-    "macbuild": { "entry": "main.js" }
+    "macbuild": {
+      "entry": "main.js"
+    },
+    "publish": {
+      "entry": "main.js"
+    }
   },
   "commands": [
     {
@@ -131,6 +138,336 @@
             "1": "署名か確かめが失敗",
             "2": "使い方の誤り（path・entitlements の file が無い）",
             "4": "host の設定の誤り・codesign が無い"
+          }
+        }
+      }
+    },
+    {
+      "name": "npm-publish",
+      "description": "指定の tarball か dir を npmjs（https://registry.npmjs.org/ を --registry で明示）に publish する（npm publish）。認証は host の npm login（host の npm の設定）をそのまま使い、wrapper は token を読まない。package の publishConfig.registry が npmjs と違う時は publish しない。実際に公開されるので、dry-run で確かめてから使う。",
+      "category": "publish",
+      "tool": "publish",
+      "version": "0.2.0",
+      "spec": {
+        "subcommand": "npm-publish",
+        "usage": "publish npm-publish [--tag <tag>] [--access <public|restricted>] [--dry-run] <target>",
+        "in": {
+          "options": {
+            "tag": {
+              "flag": "--tag",
+              "type": "string",
+              "description": "dist-tag（省略時は npm の既定の latest）"
+            },
+            "access": {
+              "flag": "--access",
+              "type": "string",
+              "description": "public か restricted（scope の package の公開範囲。省略時は npm の既定）"
+            },
+            "dryRun": {
+              "flag": "--dry-run",
+              "type": "boolean",
+              "description": "実際には出さず、npm の dry-run で確かめる"
+            }
+          },
+          "positionals": [
+            {
+              "name": "target",
+              "type": "string",
+              "description": "publish する tarball（.tgz・.tar.gz）か package の dir。相対 path は起動した cwd から"
+            }
+          ]
+        },
+        "out": {
+          "stdout": {
+            "format": "json",
+            "description": "成功: { ok: true, registry, target, targetKind: dir|tarball, name, version, tag, access, dryRun }。失敗: { ok: false, ...同じ, error }（error は秘密を伏せた npm の message）。npmjs の認証が無い時は npm の message のまま失敗（終了 code 1）。設定・道具・使い方の誤り: { ok: false, error }（使い方の誤りは stdout に出さない）"
+          },
+          "stderr": "進捗（名前・版・registry）と失敗の message（伏せてある）",
+          "exitCodes": {
+            "0": "publish できた（dry-run なら確かめが通った）",
+            "1": "npm publish の失敗、または package の publishConfig.registry が指定の registry と違う",
+            "2": "使い方の誤り（target が無い・tag や access の形が不正）",
+            "4": "host の設定の誤り・npm が無い"
+          }
+        }
+      }
+    },
+    {
+      "name": "verdaccio-publish",
+      "description": "指定の tarball か dir を、host の設定の verdaccio の registry（verdaccioRegistry）に publish する。認証は host の npm login をそのまま使う。設定が無い時は終了 code 4。package の publishConfig.registry が設定の registry と違う時は publish しない。",
+      "category": "publish",
+      "tool": "publish",
+      "version": "0.2.0",
+      "spec": {
+        "subcommand": "verdaccio-publish",
+        "usage": "publish verdaccio-publish [--tag <tag>] [--access <public|restricted>] [--dry-run] <target>",
+        "in": {
+          "options": {
+            "tag": {
+              "flag": "--tag",
+              "type": "string",
+              "description": "dist-tag（省略時は npm の既定の latest）"
+            },
+            "access": {
+              "flag": "--access",
+              "type": "string",
+              "description": "public か restricted（scope の package の公開範囲。省略時は npm の既定）"
+            },
+            "dryRun": {
+              "flag": "--dry-run",
+              "type": "boolean",
+              "description": "実際には出さず、npm の dry-run で確かめる"
+            }
+          },
+          "positionals": [
+            {
+              "name": "target",
+              "type": "string",
+              "description": "publish する tarball（.tgz・.tar.gz）か package の dir。相対 path は起動した cwd から"
+            }
+          ]
+        },
+        "out": {
+          "stdout": {
+            "format": "json",
+            "description": "成功: { ok: true, registry, target, targetKind: dir|tarball, name, version, tag, access, dryRun }。失敗: { ok: false, ...同じ, error }（error は秘密を伏せた npm の message）。registry は host の設定（verdaccioRegistry）。設定・道具・使い方の誤り: { ok: false, error }（使い方の誤りは stdout に出さない）"
+          },
+          "stderr": "進捗（名前・版・registry）と失敗の message（伏せてある）",
+          "exitCodes": {
+            "0": "publish できた（dry-run なら確かめが通った）",
+            "1": "npm publish の失敗、または package の publishConfig.registry が指定の registry と違う",
+            "2": "使い方の誤り（target が無い・tag や access の形が不正）",
+            "4": "host の設定の誤り・npm が無い"
+          }
+        }
+      }
+    },
+    {
+      "name": "github-repo-create",
+      "description": "host の gh の CLI（gh repo create）で GitHub の repo を作る。認証は host の gh の認証をそのまま使う。公開範囲の既定は private。",
+      "category": "publish",
+      "tool": "publish",
+      "version": "0.2.0",
+      "spec": {
+        "subcommand": "github-repo-create",
+        "usage": "publish github-repo-create [--visibility <public|private|internal>] [--description <text>] <repo>",
+        "in": {
+          "options": {
+            "visibility": {
+              "flag": "--visibility",
+              "type": "string",
+              "description": "公開範囲（public・private・internal）。省略時は private"
+            },
+            "description": {
+              "flag": "--description",
+              "type": "string",
+              "description": "repo の説明"
+            }
+          },
+          "positionals": [
+            {
+              "name": "repo",
+              "type": "string",
+              "description": "owner/name"
+            }
+          ]
+        },
+        "out": {
+          "stdout": {
+            "format": "json",
+            "description": "成功: { ok: true, repo, visibility, url }。失敗: { ok: false, repo, visibility, error }（error は秘密を伏せた message）。"
+          },
+          "stderr": "進捗と失敗の message（伏せてある）",
+          "exitCodes": {
+            "0": "repoを作れた",
+            "1": "repoの作成が失敗（認証・権限・重複など。message は伏せてある）",
+            "2": "使い方の誤り（repo・tag・path の形が不正、file が無い）",
+            "4": "host の設定の誤り・道具（gh・git）が無い・認証が取れない"
+          }
+        }
+      }
+    },
+    {
+      "name": "github-release-create",
+      "description": "host の gh の CLI（gh release create）で GitHub の release を作る（tag・題・本文の file・target・draft・prerelease・asset の添付）。認証は host の gh の認証をそのまま使う。",
+      "category": "publish",
+      "tool": "publish",
+      "version": "0.2.0",
+      "spec": {
+        "subcommand": "github-release-create",
+        "usage": "publish github-release-create [--title <title>] [--notes-file <file>] [--target <ref>] [--draft] [--prerelease] [--assets <file,...>] <repo> <tag>",
+        "in": {
+          "options": {
+            "title": {
+              "flag": "--title",
+              "type": "string",
+              "description": "release の題。省略時は tag"
+            },
+            "notesFile": {
+              "flag": "--notes-file",
+              "type": "string",
+              "description": "release の本文の file の path。省略時は空"
+            },
+            "target": {
+              "flag": "--target",
+              "type": "string",
+              "description": "tag が無い時にその tag を作る branch か commit。省略時は repo の既定"
+            },
+            "draft": {
+              "flag": "--draft",
+              "type": "boolean",
+              "description": "下書きの release にする"
+            },
+            "prerelease": {
+              "flag": "--prerelease",
+              "type": "boolean",
+              "description": "prerelease にする"
+            },
+            "assets": {
+              "flag": "--assets",
+              "type": "string",
+              "description": "添付する file の path を , で区切る（相対 path は cwd から。path に , と # は使えない）"
+            }
+          },
+          "positionals": [
+            {
+              "name": "repo",
+              "type": "string",
+              "description": "owner/name"
+            },
+            {
+              "name": "tag",
+              "type": "string",
+              "description": "release の tag（- で始めない）"
+            }
+          ]
+        },
+        "out": {
+          "stdout": {
+            "format": "json",
+            "description": "成功: { ok: true, repo, tag, draft, prerelease, assets, url }。失敗: { ok: false, repo, tag, draft, prerelease, assets, error }（error は秘密を伏せた message）。"
+          },
+          "stderr": "進捗と失敗の message（伏せてある）",
+          "exitCodes": {
+            "0": "releaseを作れた",
+            "1": "releaseの作成が失敗（認証・権限・重複など。message は伏せてある）",
+            "2": "使い方の誤り（repo・tag・path の形が不正、file が無い）",
+            "4": "host の設定の誤り・道具（gh・git）が無い・認証が取れない"
+          }
+        }
+      }
+    },
+    {
+      "name": "gitea-repo-create",
+      "description": "Gitea の REST API（/api/v1）を node の fetch から呼んで repo を作る（curl は使わない）。owner が host の設定の giteaUsername と同じなら user の repo、違えば organization の repo。token は実行時に git credential fill（protocol・host は giteaUrl から、username は giteaUsername）で取り出し、出力に出さない。公開範囲の既定は private。",
+      "category": "publish",
+      "tool": "publish",
+      "version": "0.2.0",
+      "spec": {
+        "subcommand": "gitea-repo-create",
+        "usage": "publish gitea-repo-create [--visibility <public|private>] [--description <text>] <repo>",
+        "in": {
+          "options": {
+            "visibility": {
+              "flag": "--visibility",
+              "type": "string",
+              "description": "公開範囲（public・private）。省略時は private"
+            },
+            "description": {
+              "flag": "--description",
+              "type": "string",
+              "description": "repo の説明"
+            }
+          },
+          "positionals": [
+            {
+              "name": "repo",
+              "type": "string",
+              "description": "owner/name"
+            }
+          ]
+        },
+        "out": {
+          "stdout": {
+            "format": "json",
+            "description": "成功: { ok: true, repo, visibility, url }。失敗: { ok: false, repo, visibility, error }（error は秘密を伏せた message）。"
+          },
+          "stderr": "進捗と失敗の message（伏せてある）",
+          "exitCodes": {
+            "0": "repoを作れた",
+            "1": "repoの作成が失敗（認証・権限・重複など。message は伏せてある）",
+            "2": "使い方の誤り（repo・tag・path の形が不正、file が無い）",
+            "4": "host の設定の誤り・道具（gh・git）が無い・認証が取れない"
+          }
+        }
+      }
+    },
+    {
+      "name": "gitea-release-create",
+      "description": "Gitea の REST API（/api/v1）を node の fetch から呼んで release を作り、asset を添付する（curl は使わない）。token は実行時に git credential fill で取り出し、出力に出さない。asset の添付が途中で失敗した時は、release は作成済みのまま、url・uploaded・failedAsset を返す。",
+      "category": "publish",
+      "tool": "publish",
+      "version": "0.2.0",
+      "spec": {
+        "subcommand": "gitea-release-create",
+        "usage": "publish gitea-release-create [--title <title>] [--notes-file <file>] [--target <ref>] [--draft] [--prerelease] [--assets <file,...>] <repo> <tag>",
+        "in": {
+          "options": {
+            "title": {
+              "flag": "--title",
+              "type": "string",
+              "description": "release の題。省略時は tag"
+            },
+            "notesFile": {
+              "flag": "--notes-file",
+              "type": "string",
+              "description": "release の本文の file の path。省略時は空"
+            },
+            "target": {
+              "flag": "--target",
+              "type": "string",
+              "description": "tag が無い時にその tag を作る branch か commit。省略時は repo の既定"
+            },
+            "draft": {
+              "flag": "--draft",
+              "type": "boolean",
+              "description": "下書きの release にする"
+            },
+            "prerelease": {
+              "flag": "--prerelease",
+              "type": "boolean",
+              "description": "prerelease にする"
+            },
+            "assets": {
+              "flag": "--assets",
+              "type": "string",
+              "description": "添付する file の path を , で区切る（相対 path は cwd から。path に , と # は使えない）"
+            }
+          },
+          "positionals": [
+            {
+              "name": "repo",
+              "type": "string",
+              "description": "owner/name"
+            },
+            {
+              "name": "tag",
+              "type": "string",
+              "description": "release の tag（- で始めない）"
+            }
+          ]
+        },
+        "out": {
+          "stdout": {
+            "format": "json",
+            "description": "成功: { ok: true, repo, tag, draft, prerelease, assets, uploaded, url }。失敗: { ok: false, repo, tag, draft, prerelease, assets, uploaded, error }（error は秘密を伏せた message）。asset の添付が失敗した時は uploaded（添付できた file）と failedAsset も出す。"
+          },
+          "stderr": "進捗と失敗の message（伏せてある）",
+          "exitCodes": {
+            "0": "releaseを作れた",
+            "1": "releaseの作成が失敗（認証・権限・重複など。message は伏せてある）",
+            "2": "使い方の誤り（repo・tag・path の形が不正、file が無い）",
+            "4": "host の設定の誤り・道具（gh・git）が無い・認証が取れない"
           }
         }
       }

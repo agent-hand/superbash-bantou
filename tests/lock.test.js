@@ -7,7 +7,10 @@ const { spawn } = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');
 const readline = require('node:readline');
-const test = require('node:test');
+const nodeTest = require('node:test');
+
+// macbuild は darwin 専用（O_EXLOCK の kernel の lock）。darwin 以外では skip にする。
+const test = (name, fn) => nodeTest(name, { skip: process.platform !== 'darwin' && 'darwin 専用' }, fn);
 
 const lock = require('../tools/macbuild/lib/lock');
 const { EXIT } = require('../tools/macbuild/lib/errors');
