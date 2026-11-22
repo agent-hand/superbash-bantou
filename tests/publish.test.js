@@ -183,7 +183,7 @@ test('npm publish: --registry が無ければ npm 自身の設定のまま（--r
   assert.equal(r.status, 0, r.stderr);
   assert.deepEqual(r.json, {
     ok: true, registry: null, target: dir, targetKind: 'dir', name: 'example-pkg', version: '1.2.3',
-    tag: 'next', access: 'public', dryRun: true,
+    tag: 'next', access: 'public', dryRun: true, pingSkipped: false,
   });
   const [rec] = H.readRecords(record);
   assert.deepEqual(rec.args, ['publish', dir, '--json', '--tag', 'next', '--access', 'public', '--dry-run']);
@@ -236,6 +236,39 @@ test('publish の前に、実際に publish する registry へ届くかを短�
   assert.ok(pings.some((a) => JSON.stringify(a) === JSON.stringify(['ping', '--registry', REGISTRY, '--fetch-retries=0', '--fetch-timeout=10000'])), 'option の registry に対して');
   assert.ok(pings.some((a) => JSON.stringify(a) === JSON.stringify(['ping', '--fetch-retries=0', '--fetch-timeout=10000'])), 'option が無ければ npm 自身の設定に対して（--registry を付けない）');
   assert.equal(H.readRecords(record).length, 2, 'publish は 2 回');
+});
+
+test('npm publish: --registry が無く scope 付き・publishConfig.registry 付きの package では、ping を省いて publish に任せる（pingSkipped）', async (t) => {
+  const { work, record, run } = setup(t);
+  const scoped = makePackage(work, { name: '@example/scoped', version: '1.0.0' });
+  const a = await run(['npm', 'publish', scoped]);
+  assert.equal(a.status, 0, a.stderr);
+  assert.equal(a.json.pingSkipped, true);
+  assert.match(a.stderr, /ping を省く/);
+
+  const pc = path.join(work, 'withpc');
+  fs.mkdirSync(pc);
+  fs.writeFileSync(path.join(pc, 'package.json'), JSON.stringify({ name: 'plain', version: '1.0.0', publishConfig: { registry: OTHER_REGISTRY } }));
+  const b = await run(['npm', 'publish', '--dry-run', pc]);
+  assert.equal(b.status, 0, b.stderr);
+  assert.equal(b.json.pingSkipped, true);
+
+  assert.equal(H.readPings(record).length, 0, 'ping は走らない');
+  assert.equal(H.readRecords(record).length, 2, 'publish は走る');
+
+  // --registry を付けた時は、scope 付きでも ping する。
+  const c = await run(['npm', 'publish', '--registry', REGISTRY, scoped]);
+  assert.equal(c.status, 0, c.stderr);
+  assert.equal(c.json.pingSkipped, false);
+  assert.equal(H.readPings(record).length, 1);
+
+  // scope も publishConfig も無い package は、--registry が無くても ping する。
+  const plain = path.join(work, 'plain');
+  fs.mkdirSync(plain);
+  fs.writeFileSync(path.join(plain, 'package.json'), JSON.stringify({ name: 'plain', version: '1.0.0' }));
+  const d = await run(['npm', 'publish', plain]);
+  assert.equal(d.json.pingSkipped, false);
+  assert.equal(H.readPings(record).length, 2);
 });
 
 test('npm publish: 届かない registry（閉じた port）では、すぐ ok:false を返し publish を走らせない', async (t) => {

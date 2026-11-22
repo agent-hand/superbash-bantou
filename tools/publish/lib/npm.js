@@ -65,7 +65,8 @@ function parseJson(text) {
 
 /**
  * registry に短い上限（retry 無し）で届くかを確かめる（npm ping）。届けば null、届かなければ理由の文字列。
- * registry が null の時は --registry を付けず、npm 自身の設定の registry に対して確かめる。
+ * registry が null の時は --registry を付けず、npm 自身の設定の既定の registry に対して確かめる
+ * （呼ぶ側は、scope 付きか publishConfig.registry を持つ package では呼ばない）。
  * launchd 常駐の process は macOS のローカルネットワーク制限で社内の registry に届かない事があり、
  * その時 npm publish は retry で長く待つうえ、dry-run では失敗を握りつぶして終了 0 を返す。
  */
@@ -131,8 +132,16 @@ async function publishPackage(values, ctx) {
     dryRun: values.dryRun,
   };
   // publish（dry-run 含む）の前に registry へ届くかを確かめる。届かなければ publish を走らせない。
-  const unreachable = await checkReachable(npm, registry, { env, cwd, redact });
-  if (unreachable) return { exitCode: 1, result: { ok: false, ...base, error: unreachable } };
+  // --registry が無く、package が scope 付きか publishConfig.registry を持つ時、npm publish は scope の registry や
+  // publishConfig の registry へ出すが、npm ping はそれを見ず npm の既定の registry だけを叩く（別の所を確かめて誤判定する）。
+  // その時は ping を省き、publish 自身に任せる（出力の pingSkipped で分かる）。
+  base.pingSkipped = !registry && ((name !== null && name.startsWith('@')) || typeof pcReg === 'string');
+  if (base.pingSkipped) {
+    ctx.stderr.write('publish: npm ping を省く（scope か publishConfig.registry の registry は ping で確かめられない）。publish に任せる\n');
+  } else {
+    const unreachable = await checkReachable(npm, registry, { env, cwd, redact });
+    if (unreachable) return { exitCode: 1, result: { ok: false, ...base, error: unreachable } };
+  }
   const r = await run(npm, args, { env, cwd });
   if (r.error || r.status !== 0 || r.timedOut) {
     const why = r.timedOut ? '時間切れ' : r.error ? r.error.code || r.error.message : `npm が終了 code ${r.status}`;

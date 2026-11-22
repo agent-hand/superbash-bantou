@@ -127,7 +127,7 @@ Tauri の build は数分から十数分かかる。superbash の既定の時間
 | `gitea repo create` | `url`（Gitea の URL）、`repo`（必須）、`visibility`（public・private。既定 private）、`description` | Gitea の REST API。token の持ち主（`GET /api/v1/user` の login）が owner と同じなら `POST /api/v1/user/repos`、違えば `/api/v1/orgs/<owner>/repos` |
 | `gitea release create` | `url`（Gitea の URL）に加えて GitHub の release と同じ | `POST /api/v1/repos/<owner>/<name>/releases` の後、asset ごとに `.../releases/<id>/assets`（multipart）。API は node の fetch で呼ぶ（curl は使わない） |
 
-`gitea` の 2 つの `url`（`--url`）は必須で、Gitea の URL（http・https。API は `<URL>/api/v1`。認証情報・query・fragment を入れない）。無い・不正なら使い方の誤り（終了 code 2）。
+`gitea` の 2 つの `url`（`--url`）は必須で、Gitea の URL（http・https。API は `<URL>/api/v1`。認証情報・query・fragment を入れない）。無い・不正なら使い方の誤り（終了 code 2）。**注意**: `http` も受けるが、token を `Authorization` で送るので、http の宛先には token が平文で送られる（本番は https を使う）。API の redirect は追わない。
 
 argv は `<上の要素の語> <サブコマンド…> <options> -- <positionals>`（例: `publish github release create --title v1.0.0 --draft -- example/app v1.0.0`）。help は bin の直後だけ: `publish help`（全体）、`publish help github release create`（葉）、`publish help github`（群）。群は呼べず、`publish github` のように群で止まると使い方の誤り。
 
@@ -158,7 +158,7 @@ command と toolset の host の設定は、ネットワークの宛先・アド
 ### registry に届く事の確かめ・長い呼び出し（npm publish）
 
 - launchd 常駐の superbash から動く npm は、macOS のローカルネットワーク制限で社内の registry に届かない事がある（`EHOSTUNREACH`）。npm は 3 回試して約 70 秒かかり、dry-run では失敗を握りつぶして終了 0 を返す。つまり **dry-run の成功は、registry に届く事も認証も保証しない**。
-- 手当て: `npm publish` は、publish（dry-run 含む）の前に、実際に publish する registry（`registry` を付けた時はそれ、無ければ npm 自身の設定）に対して `npm ping [--registry <url>] --fetch-retries=0 --fetch-timeout=10000` で届くかを確かめる。届かなければ publish を走らせず、すぐ `{ "ok": false, "error": ... }`（届かない事と、ローカルネットワーク制限の可能性）を返して終了 code 1。届く時は今のまま publish する（publish 本体の retry 設定は変えない）。この確かめが保証するのは「届く事」だけで、認証は保証しない。
+- 手当て: `npm publish` は、publish（dry-run 含む）の前に、`registry` を付けた時、または scope も `publishConfig.registry` も無い package の時は、その registry（`registry`、無ければ npm の既定の registry）に対して `npm ping [--registry <url>] --fetch-retries=0 --fetch-timeout=10000` で届くかを確かめる。`registry` が無く、package が scope 付きか `publishConfig.registry` を持つ時は、`npm ping` が scope や publishConfig の registry を見ず別の registry を叩いて誤判定するので、ping を省いて publish 自身に任せる（出力の `pingSkipped` が `true`。stderr にも出る）。届かなければ publish を走らせず、すぐ `{ "ok": false, "error": ... }`（届かない事と、ローカルネットワーク制限の可能性）を返して終了 code 1。届く時は今のまま publish する（publish 本体の retry 設定は変えない）。この確かめが保証するのは「届く事」だけで、認証は保証しない。
 - Claude Code は http の MCP の 1 回の呼び出しを既定 60 秒で打ち切る（mcp の設定の `timeout` で延ばせる。進み具合の通知では延びない）。長くなりうる command は `run_in_background: true` で呼ぶ。
 - 打ち切られても command は最後まで走り続ける。「時間切れ」と出ても公開済みの事があるので、**本番 publish を呼び直す前に、結果（registry に出たか）を確かめる**（二重の publish を避ける）。
 
@@ -172,6 +172,7 @@ command と toolset の host の設定は、ネットワークの宛先・アド
 - Gitea の asset は file 全体を memory に読んで送る。
 - tarball の `publishConfig.registry` の確かめは `tar` が PATH に有る時だけ（無ければ名前・版も空になる）。
 - Gitea の asset の添付が途中で失敗した時、release は作られたまま残る（`url`・`uploaded`・`failedAsset` を返す）。
+- Gitea の token は、URL の protocol と host（port 付き）だけで `git credential fill` を引く（path は渡さない）。`credential.useHttpPath` で path ごとに token を持つ構成では取れない。
 - Gitea の repo の owner が token の持ち主と違えば organization の repo として作る（`GET /user` が取れない時は失敗として返す）。
 
 ## MCP の設定（host の側）
