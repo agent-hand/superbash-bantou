@@ -39,9 +39,6 @@ const NOTARIZE_FIELDS = Object.freeze(
     .map(([key, f]) => [key, f.passAs]),
 );
 
-// 同じ設定の file を読む publish の tool の key（未知の key の警告から外す）。
-const PUBLISH_KEYS = new Set(['verdaccioRegistry', 'giteaUrl', 'giteaUsername']);
-
 const ENV_NAME_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 function defaultConfigPath(home) {
@@ -113,7 +110,7 @@ function loadConfig({ env = process.env, home = os.homedir(), cwd = process.cwd(
   }
   if (data) {
     for (const [key, value] of Object.entries(data)) {
-      if (key === '$schema' || PUBLISH_KEYS.has(key)) continue;
+      if (key === '$schema') continue;
       if (!Object.prototype.hasOwnProperty.call(FIELDS, key)) {
         warnings.push(`設定の file の未知の key を無視する: ${key}`);
         continue;

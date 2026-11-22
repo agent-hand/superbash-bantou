@@ -10,6 +10,20 @@ const REPO_RE = /^([A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?)\/([A-Za-z0-9._-]+
 const TAG_RE = /^[A-Za-z0-9][A-Za-z0-9._\/+-]*$/;
 const TARGET_RE = /^[A-Za-z0-9][A-Za-z0-9._\/+-]*$/;
 
+/** 呼ぶ時の引数の URL を検証する（http・https のみ。userinfo・query・fragment は誤り）。URL オブジェクトを返す。 */
+function normalizeUrl(value, where) {
+  let u;
+  try {
+    u = new URL(value);
+  } catch {
+    throw new UsageError(`${where} は URL でなければならない`);
+  }
+  if (u.protocol !== 'http:' && u.protocol !== 'https:') throw new UsageError(`${where} は http か https の URL でなければならない`);
+  if (u.username || u.password) throw new UsageError(`${where} に認証情報（user:pass@）を入れてはならない`);
+  if (u.search || u.hash) throw new UsageError(`${where} に query・fragment を入れてはならない`);
+  return u;
+}
+
 function parseRepo(repo) {
   const m = repo.match(REPO_RE);
   if (!m || m[2] === '.' || m[2] === '..' || m[2].endsWith('.git')) throw new UsageError(`repo は owner/name の形: ${repo}`);
@@ -72,4 +86,4 @@ function resolveAssets(assets, cwd) {
   return out;
 }
 
-module.exports = { parseRepo, checkTag, checkTarget, checkVisibility, checkDescription, readNotes, resolveAssets };
+module.exports = { normalizeUrl, parseRepo, checkTag, checkTarget, checkVisibility, checkDescription, readNotes, resolveAssets };

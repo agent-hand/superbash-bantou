@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 'use strict';
-// publish: npm・verdaccio への publish と、GitHub・Gitea の repo・release の作成の窓口。使い方は `publish help`。
+// publish: npm の package の公開と、GitHub・Gitea の repo・release の作成の窓口。使い方は `publish help`。
 
 const { main } = require('./lib/cli');
 
