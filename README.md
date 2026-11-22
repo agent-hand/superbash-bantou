@@ -1,10 +1,12 @@
 # superbash-bantou
 
-[superbash](https://github.com/agent-hand/superbash) の toolset（0.5.0）。mac でしか出来ない build（Tauri）と codesign の署名（`macbuild` の下に `info`・`tauri`・`sign`）、npm の package の公開と GitHub・Gitea の repo・release の作成（`npm`・`github`・`gitea` の下のサブコマンド）を、MCP の道具 `superbash-command` の command として出す。
+[superbash](https://github.com/agent-hand/superbash) の toolset（0.6.0）。mac でしか出来ない build（Tauri）と codesign の署名（`macbuild` の下に `info`・`tauri`・`sign`）、npm の package の公開と GitHub・Gitea の repo・release の作成（`npm`・`github`・`gitea` の下のサブコマンド）を、MCP の道具 `superbash-command` の command として出す。
 
 **使える superbash の版: 0.2.0 以上。** 0.3.0 以降の manifest は入れ子のサブコマンド（superbash 0.2.0 で対応）で書いてあり、0.1.x は読めない（群に `spec` が無いので「形が不正」で止まるか、`subcommands` を黙って捨てる）。呼ぶ名前は `macbuild info` のように空白で区切った並び。
 
-0.5.0 は、busybox 化の module 対応を足した版（toolset の作法 5.3）。各 tool は `dist/cli.mjs`（入口）に加え、読み込んでも走らない module `dist/main.mjs` を出し、manifest の `tools.<名前>.module` が指す。module は `main`（citty の command）と `run(rawArgs: string[]): Promise<number>`（`runCommand` で呼び、使い方の誤りは 2・その他の誤りは 1 などの終了 code を返す）を export する。`cli.mjs` は `run(process.argv.slice(2))` の結果を終了 code にするだけ。呼ぶ名前・引数・出力・終了 code は 0.4.0 と同じ。module を知らない superbash（0.2.0）は今までどおり entry（`cli.mjs`）で動く。1 つの実行 file にはまとめない。
+0.6.0 は、superbash 0.4.0 の `--sandbox` 用の方針を manifest に足した版（下の「sandbox」）。呼ぶ名前・引数・出力・終了 code は 0.5.0 と同じ。
+
+0.5.0 は、busybox 化の module 対応を足した版（toolset の作法 5.4）。各 tool は `dist/cli.mjs`（入口）に加え、読み込んでも走らない module `dist/main.mjs` を出し、manifest の `tools.<名前>.module` が指す。module は `main`（citty の command）と `run(rawArgs: string[]): Promise<number>`（`runCommand` で呼び、使い方の誤りは 2・その他の誤りは 1 などの終了 code を返す）を export する。`cli.mjs` は `run(process.argv.slice(2))` の結果を終了 code にするだけ。呼ぶ名前・引数・出力・終了 code は 0.4.0 と同じ。module を知らない superbash（0.2.0）は今までどおり entry（`cli.mjs`）で動く。1 つの実行 file にはまとめない。
 
 0.4.0 は、command を TypeScript（[citty](https://github.com/unjs/citty)）で書き直し、配る前に 1 つの JS にまとめた版。呼ぶ名前・引数・出力・終了 code は 0.3.0 と同じ（entry が `main.js` から `dist/cli.mjs` に変わっただけ）。
 
@@ -182,6 +184,17 @@ command と toolset の host の設定は、ネットワークの宛先・アド
 - Gitea の asset の添付が途中で失敗した時、release は作られたまま残る（`url`・`uploaded`・`failedAsset` を返す）。
 - Gitea の token は、URL の protocol と host（port 付き）だけで `git credential fill` を引く（path は渡さない）。`credential.useHttpPath` で path ごとに token を持つ構成では取れない。
 - Gitea の repo の owner が token の持ち主と違えば organization の repo として作る（`GET /user` が取れない時は失敗として返す）。
+
+## sandbox（superbash 0.4.0 の `--sandbox`）
+
+superbash 0.4.0 は `--sandbox` で command を閉じた環境で動かせる。各 tool の方針は manifest の `tools.<名前>.sandbox = { "write": [path...], "network": true|false }` に書く。path は `~`・`$TMPDIR`・`.` で始められる。宛先・アドレスは書かない（この toolset の方針と同じ。宛先は呼ぶ時の引数で受ける）。`sandbox` の項が無い tool の既定は、network なし・write は superbash の置き場と一時の dir だけ。
+
+| tool（command） | write | network | 理由 |
+|---|---|---|---|
+| `macbuild`（`macbuild info`・`tauri`・`sign`） | `~`・`$TMPDIR` | true | project の build が home の下に書く。crate の取得 |
+| `publish`（`npm`・`github`・`gitea`） | `~/.npm`・`~/.config/gh`・`$TMPDIR` | true | npm の cache、gh の設定の dir、一時の dir。公開先への通信 |
+
+`--sandbox` を使わない時は、この項は効かない（読まれるだけ）。
 
 ## MCP の設定（host の側）
 

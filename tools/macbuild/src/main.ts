@@ -9,7 +9,7 @@ import { tauri } from './command/tauri.ts';
 export const main = defineCommand({
   meta: {
     name: 'macbuild',
-    version: '0.5.0',
+    version: '0.6.0',
     description:
       'mac でしか出来ない build（Tauri）と codesign の署名の窓口。署名の identity・updater の鍵・公証の資格は host の設定から読み、道具の引数にも出力にも出さない。',
   },
