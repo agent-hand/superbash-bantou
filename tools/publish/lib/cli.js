@@ -8,8 +8,9 @@ const { EXIT } = require('./errors');
 const { TOOL, toolCommands } = require('./manifest');
 const { envSecrets, makeRedactor } = require('./secrets');
 
-function writeJson(stream, redact, value) {
-  stream.write(redact(JSON.stringify(value, null, 2)) + '\n');
+// redactDeep: 値の文字列の葉だけを伏せる関数（直列化の後の文字列には通さない）。
+function writeJson(stream, redactDeep, value) {
+  stream.write(JSON.stringify(redactDeep(value), null, 2) + '\n');
 }
 
 /** help: spec（toolconfig.json の定義）をそのまま出す。command は名前（npm-publish）か副 command（同じ名前）。 */
@@ -59,22 +60,22 @@ async function dispatch(subcommand, values, ctx, io) {
 
 async function main(argv, io = { stdout: process.stdout, stderr: process.stderr, env: process.env, cwd: process.cwd() }) {
   const redactor = makeRedactor(envSecrets(io.env));
-  const { redact, add } = redactor;
+  const { redact, redactDeep, add } = redactor;
   // stderr にも伏せを通す。
   const stderr = { write: (s) => io.stderr.write(redact(s)) };
   try {
     const { subcommand, values } = parse(argv);
-    if (subcommand === HELP) return help(values, io, redact);
+    if (subcommand === HELP) return help(values, io, redactDeep);
     const ctx = { env: io.env, cwd: io.cwd || process.cwd(), stderr, redact, addSecret: add };
     const { exitCode, result } = await dispatch(subcommand, values, ctx, { ...io, stderr });
     if (!result.ok) stderr.write(`publish: ${result.error}\n`);
-    writeJson(io.stdout, redact, result);
+    writeJson(io.stdout, redactDeep, result);
     return exitCode;
   } catch (e) {
     const code = typeof e.exitCode === 'number' ? e.exitCode : EXIT.FAIL;
     const message = redact(e.message);
     io.stderr.write(`publish: ${message}\n`);
-    if (code !== EXIT.USAGE) writeJson(io.stdout, redact, { ok: false, error: message });
+    if (code !== EXIT.USAGE) writeJson(io.stdout, redactDeep, { ok: false, error: message });
     return code;
   }
 }

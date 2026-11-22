@@ -196,11 +196,14 @@ test('npm-publish: 失敗の message と環境の秘密は伏せる・使い方�
   const dir = makePackage(work, { name: 'example-pkg', version: '1.0.0' });
   const r = await run(['npm-publish', dir], {
     NPM_TOKEN: H.FAKE.envSecret,
+    NPM_CONFIG_ALWAYS_AUTH: 'true', // 名前が AUTH の変数の値 true で、出力の JSON を壊さない
     FAKE_EXIT: '1',
     FAKE_STDERR: `npm error 401 //registry.npmjs.org/:_authToken=${H.FAKE.npmToken} ${H.FAKE.envSecret}`,
   });
   assert.equal(r.status, 1);
+  assert.ok(r.json, `stdout が JSON でない: ${r.stdout}`);
   assert.equal(r.json.ok, false);
+  assert.equal(r.json.dryRun, false);
   assert.match(r.json.error, /npm publish が失敗/);
   noLeak(r, H.FAKE.npmToken, H.FAKE.envSecret);
 
