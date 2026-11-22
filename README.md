@@ -1,15 +1,17 @@
 # superbash-bantou
 
-[superbash](https://github.com/agent-hand/superbash) の toolset。mac でしか出来ない build（Tauri）と codesign の署名を、MCP の道具 `superbash-command` の command として出す。
+[superbash](https://github.com/agent-hand/superbash) の toolset（0.2.0）。mac でしか出来ない build（Tauri）と codesign の署名（macbuild の 3 command）、npm・verdaccio への publish と GitHub・Gitea の repo・release の作成（publish の 6 command）を、MCP の道具 `superbash-command` の command として出す。
 
 署名の identity・updater の鍵・その password・公証の資格は **host の設定** から読む。道具の引数にも出力にも log にも出さない。
 
 ## 構成
 
 ```
-.manifest/toolconfig.json   定義（正本）。command 3 つの spec
-tools/macbuild/main.js      CLI の入口（node。依存なし）
-tools/macbuild/lib/         CLI の中身
+.manifest/toolconfig.json   定義（正本）。command 9 つ（macbuild 3・publish 6）の spec
+tools/macbuild/main.js      macbuild の CLI の入口（node。依存なし）
+tools/macbuild/lib/         macbuild の中身
+tools/publish/main.js       publish の CLI の入口（node。依存なし）
+tools/publish/lib/          publish の中身
 tests/                      node:test の test と、Tauri の最小の雛形（tests/fixtures/tauri-min）
 ```
 
@@ -99,6 +101,62 @@ Tauri の build は数分から十数分かかる。superbash の既定の時間
 - lock の file の中身（pid・開始時刻・project）は持ち主の表示のためだけ。file は消さない。
 - lock の状態は `macbuild-info` の `lock` で見られる。
 
+## 公開操作（publish の 6 command）
+
+`tools/publish/`（CLI は `publish`）。npmjs・verdaccio への publish と、GitHub・Gitea の repo・release の作成。**実際に公開・作成される**ので、使う前に対象を確かめる（npm は `dryRun` がある）。PR の作成・merge・CI の状態を見る command は無い。任意の command 文字列は受けず、gh や Gitea の API を丸ごと通す事もしない。子 process は引数の配列で起動し、shell を通さない。
+
+| command | 引数（superbash の `args`） | すること |
+|---|---|---|
+| `npm-publish` | `target`（必須。tarball か dir）、`tag`、`access`（public・restricted）、`dryRun` | `npm publish <target> --registry https://registry.npmjs.org/ --json` |
+| `verdaccio-publish` | 同じ | 同じ物を、host の設定の `verdaccioRegistry` に publish する |
+| `github-repo-create` | `repo`（必須。owner/name）、`visibility`（public・private・internal。既定 private）、`description` | host の gh で `gh repo create` |
+| `github-release-create` | `repo`・`tag`（必須）、`title`（既定は tag）、`notesFile`、`target`、`draft`、`prerelease`、`assets`（`,` 区切りの file の path） | host の gh で `gh release create`（asset を添付） |
+| `gitea-repo-create` | `repo`（必須）、`visibility`（public・private。既定 private）、`description` | Gitea の REST API `POST /api/v1/user/repos`（owner が `giteaUsername` と同じ）か `/api/v1/orgs/<owner>/repos` |
+| `gitea-release-create` | GitHub の release と同じ | `POST /api/v1/repos/<owner>/<name>/releases` の後、asset ごとに `.../releases/<id>/assets`（multipart）。API は node の fetch で呼ぶ（curl は使わない） |
+
+すべて stdout に JSON を 1 つ出す（作った repo・release の `url`、publish した `name`・`version`・`registry` など）。終了 code は 0 成功、1 失敗（失敗の message は秘密を伏せてから返す）、2 使い方の誤り、4 host の設定の誤り・道具（npm・gh・git）や認証の不足。spec は `publish help`、1 つは `publish help github-repo-create`。
+
+```json
+{ "name": "npm-publish", "args": { "target": "/path/to/pkg-1.0.0.tgz", "tag": "next", "dryRun": true } }
+{ "name": "github-release-create", "args": { "repo": "example/app", "tag": "v1.0.0", "notesFile": "/path/to/notes.md", "assets": "/path/to/app.zip,/path/to/app.dmg" } }
+{ "name": "gitea-repo-create", "args": { "repo": "example-org/app", "visibility": "private" } }
+```
+
+### 認証
+
+- npmjs・verdaccio: host の npm の設定（`npm login`）をそのまま使う。wrapper は token を読まない・渡さない。`--registry` は指定の registry を明示し、scope の package には `--@scope:registry=` も付ける。package の `publishConfig.registry` が指定の registry と違う時は、publish せずに終了 code 1。
+- GitHub: host の gh の認証をそのまま使う。
+- Gitea: token は実行時に `git credential fill`（stdin に protocol・host は `giteaUrl` から、username は `giteaUsername`）で取り出して API の `Authorization` に渡す。host の git の credential helper に token が入っている必要がある。token は stdout・stderr・error message に出さない（`lib/secrets.js` が値と形で伏せる）。API の redirect は追わない。
+- 伏せ: 環境の名前が token・password・secret・credential・auth らしい変数の値、npm・GitHub の token の形、`_authToken=`、`Authorization:`、URL の `user:pass@`、取り出した Gitea の token。
+
+### host の設定（publish）
+
+macbuild と同じ設定の file（`~/.config/superbash-bantou/config.json`。`PUBLISH_CONFIG` で別の path）。環境変数が file に勝つ。既定は無く、必要な command で無ければ終了 code 4。互いの key は未知の key の警告に出さない。
+
+| file の key | 環境変数 | 意味 | 使う command |
+|---|---|---|---|
+| `verdaccioRegistry` | `PUBLISH_VERDACCIO_REGISTRY` | verdaccio の registry の URL（http・https。認証情報を入れない） | `verdaccio-publish` |
+| `giteaUrl` | `PUBLISH_GITEA_URL` | Gitea の URL（http・https。API は `<URL>/api/v1`。認証情報を入れない） | `gitea-*` |
+| `giteaUsername` | `PUBLISH_GITEA_USERNAME` | git credential の username。repo の owner がこれと同じなら user の repo として作る | `gitea-*` |
+| （`PUBLISH_CONFIG`） | `PUBLISH_CONFIG` | 設定の file の path | 全部 |
+
+設定の file の例（値は架空）:
+
+```json
+{
+  "verdaccioRegistry": "https://npm.example.invalid/",
+  "giteaUrl": "https://git.example.invalid",
+  "giteaUsername": "example-user"
+}
+```
+
+### 既知の制限（publish）
+
+- `assets` の path に `,` と `#` は使えない（区切りと gh の label の記法のため）。
+- Gitea の asset は file 全体を memory に読んで送る。
+- tarball の `publishConfig.registry` の確かめは `tar` が PATH に有る時だけ（無ければ名前・版も空になる）。
+- Gitea の asset の添付が途中で失敗した時、release は作られたまま残る（`url`・`uploaded`・`failedAsset` を返す）。
+
 ## MCP の設定（host の側）
 
 superbash の MCP の設定の 1 件として書く。toolset は npm に渡せる物なら何でもよい: GitHub の repo（`github:agent-hand/superbash-bantou`。既定の branch）・package の名前@版・手元の dir（env の値は架空）:
@@ -122,7 +180,7 @@ superbash の MCP の設定の 1 件として書く。toolset は npm に渡せ�
 }
 ```
 
-`--allow-cmd macbuild-info,macbuild-tauri` のように、出す command を絞れる。
+`--allow-cmd macbuild-info,macbuild-tauri` のように（公開操作を出さないなら publish の 6 command を含めない）、出す command を絞れる。
 
 toolset を変えたら `package.json` の `version` を上げる。superbash 0.1.0 は起動のたびに package を生成し直すが、npx は生成した tarball の path と名前@版が同じだと、前に展開した写し（npm の cache の `_npx/`）を使い続ける（この Mac で確かめた）。
 
@@ -144,6 +202,8 @@ npm test
 ```
 
 node:test で、spec と help の整合、argv の組み立て（superbash の spec.in の規則 → CLI）、設定の読み込み（環境変数と file の優先・未知の key の警告）、排他の振る舞い（SIGKILL の後に取れる事を含む）、子の環境から秘密の変数を外す事と出力・log での伏せ（偽の identity と偽の `APPLE_*` の値で）、偽の Tauri の CLI と ad-hoc の codesign による build・署名の流れを確かめる。偽の identity では本物の codesign を呼ばない（keychain を引かせない）。一時の dir は `os.tmpdir()`（`TMPDIR`）の下に作って消す。
+
+publish の test（`tests/publish.test.js`）は、偽の npm・gh（PATH の先に置く stub。argv を記録する）、`127.0.0.1` に立てる偽の Gitea API server、偽の HOME の使い捨ての git 設定（偽の credential helper）で、組み立てた argv・API の要求（asset の multipart を含む）・出力・秘密の伏せを確かめる。実際の npmjs・verdaccio・GitHub・Gitea には何も書かない。
 
 `tests/fixtures/tauri-min` は画面 1 つの Tauri の最小の雛形（実際の build の確かめ用。test からは使わない）。
 

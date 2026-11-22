@@ -5,7 +5,10 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const test = require('node:test');
+const nodeTest = require('node:test');
+
+// macbuild は darwin 専用（codesign と mac の build の道具）。darwin 以外では skip にする。
+const test = (name, fn) => nodeTest(name, { skip: process.platform !== 'darwin' && 'darwin 専用' }, fn);
 
 const codesign = require('../tools/macbuild/lib/codesign');
 const { EXIT } = require('../tools/macbuild/lib/errors');
