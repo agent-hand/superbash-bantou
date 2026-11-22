@@ -5,15 +5,16 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const test = require('node:test');
 
-const codesign = require('../tools/macbuild/lib/codesign');
-const { parse } = require('../tools/macbuild/lib/commands');
-const { UsageError, EnvError, EXIT } = require('../tools/macbuild/lib/errors');
-const tauri = require('../tools/macbuild/lib/tauri');
+const codesign = require('../tools/macbuild/src/lib/codesign.ts');
+const { UsageError, EnvError, EXIT } = require('../tools/macbuild/src/lib/errors.ts');
+const tauri = require('../tools/macbuild/src/lib/tauri.ts');
+const { loadDef } = require('./helpers/cli-def');
 const { buildArgv, findLeaf } = require('./helpers/spec-in');
 const { MANIFEST, FAKE, makeTmp, rmTmp, cleanEnv, runCli } = require('./helpers/env');
 
 const manifest = JSON.parse(fs.readFileSync(MANIFEST, 'utf8'));
 const leaf = (name) => findLeaf(manifest, 'macbuild', name);
+const { parse } = loadDef('macbuild'); // citty の定義を、入口（cli.ts）と同じ検査・読み方で使う
 
 test('spec.in の規則で組んだ argv', () => {
   assert.deepEqual(buildArgv(leaf('macbuild info'), {}), ['info']);

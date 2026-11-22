@@ -1,8 +1,10 @@
 # superbash-bantou
 
-[superbash](https://github.com/agent-hand/superbash) の toolset（0.3.0）。mac でしか出来ない build（Tauri）と codesign の署名（`macbuild` の下に `info`・`tauri`・`sign`）、npm の package の公開と GitHub・Gitea の repo・release の作成（`npm`・`github`・`gitea` の下のサブコマンド）を、MCP の道具 `superbash-command` の command として出す。
+[superbash](https://github.com/agent-hand/superbash) の toolset（0.4.0）。mac でしか出来ない build（Tauri）と codesign の署名（`macbuild` の下に `info`・`tauri`・`sign`）、npm の package の公開と GitHub・Gitea の repo・release の作成（`npm`・`github`・`gitea` の下のサブコマンド）を、MCP の道具 `superbash-command` の command として出す。
 
-**使える superbash の版: 0.2.0 以上。** 0.3.0 の manifest は入れ子のサブコマンド（superbash 0.2.0 で対応）で書いてあり、0.1.x は読めない（群に `spec` が無いので「形が不正」で止まるか、`subcommands` を黙って捨てる）。呼ぶ名前は `macbuild info` のように空白で区切った並び。
+**使える superbash の版: 0.2.0 以上。** 0.3.0 以降の manifest は入れ子のサブコマンド（superbash 0.2.0 で対応）で書いてあり、0.1.x は読めない（群に `spec` が無いので「形が不正」で止まるか、`subcommands` を黙って捨てる）。呼ぶ名前は `macbuild info` のように空白で区切った並び。
+
+0.4.0 は、command を TypeScript（[citty](https://github.com/unjs/citty)）で書き直し、配る前に 1 つの JS にまとめた版。呼ぶ名前・引数・出力・終了 code は 0.3.0 と同じ（entry が `main.js` から `dist/cli.mjs` に変わっただけ）。
 
 署名の identity・updater の鍵・その password・公証の資格は **host の設定** から読む。道具の引数にも出力にも log にも出さない。command と toolset の host の設定は、ネットワークの宛先・アドレス（registry・Gitea の URL など）を持たない。宛先が要る command は、呼ぶ時の引数（`--registry`・`--url`）で受ける。
 
@@ -18,10 +20,12 @@
 
 ```
 .manifest/toolconfig.json   定義（正本。入れ子）。上の要素 4 つ（macbuild・npm・github・gitea）、呼べる葉 8 つの spec
-tools/macbuild/main.js      macbuild の CLI の入口（node。依存なし）
-tools/macbuild/lib/         macbuild の中身
-tools/publish/main.js       publish の CLI の入口（node。依存なし）
-tools/publish/lib/          publish の中身
+tools/<名前>/src/main.ts    citty の定義（`export const main`。定義だけで、読み込んでも走らない）
+tools/<名前>/src/cli.ts     入口（`runCommand` で呼ぶ。使い方の誤りは終了 2。`-h` を値として紛れさせない）
+tools/<名前>/src/command/   サブコマンド 1 つ 1 file（群は dir の index.ts。群は run を持たない）
+tools/<名前>/src/lib/       中身（伏せ・lock・codesign・gh・Gitea の REST・npm の呼び出し・到達の確かめ・引数の検査）
+tools/<名前>/dist/cli.mjs   build の結果（citty も入れた 1 file。shebang つき・実行の権限つき）← manifest の entry が指す
+scripts/build.mjs          src/cli.ts を dist/cli.mjs にまとめる（esbuild）
 tests/                      node:test の test と、Tauri の最小の雛形（tests/fixtures/tauri-min）
 ```
 
@@ -152,7 +156,7 @@ command と toolset の host の設定は、ネットワークの宛先・アド
 
 - npm: host の npm の設定（`npm login`）をそのまま使う。wrapper は token を読まない・渡さない。`registry` を付けた時は scope の package に `--@scope:registry=` も付ける。
 - GitHub: host の gh の認証をそのまま使う。
-- Gitea: token は実行時に `git credential fill`（stdin に protocol・host を `url` から）で取り出して API の `Authorization` に渡す。host の git の credential helper に token が入っている必要がある。token は stdout・stderr・error message に出さない（`lib/secrets.js` が値と形で伏せる）。API の redirect は追わない。
+- Gitea: token は実行時に `git credential fill`（stdin に protocol・host を `url` から）で取り出して API の `Authorization` に渡す。host の git の credential helper に token が入っている必要がある。token は stdout・stderr・error message に出さない（`src/lib/secrets.ts` が値と形で伏せる）。API の redirect は追わない。
 - 伏せ: 環境の名前が token・password・secret・credential・auth らしい変数の値、npm・GitHub の token の形、`_authToken=`、`Authorization:`、URL の `user:pass@`、取り出した Gitea の token。
 
 ### registry に届く事の確かめ・長い呼び出し（npm publish）
@@ -202,6 +206,22 @@ superbash の MCP の設定の 1 件として書く。toolset は npm に渡せ�
 
 toolset を変えたら `package.json` の `version` を上げる。superbash は起動のたびに package を生成し直すが、npx は生成した tarball の path と名前@版が同じだと、前に展開した写し（npm の cache の `_npx/`）を使い続ける（この Mac で確かめた）。
 
+## 作り方（build）
+
+command は TypeScript で書き、配る前に `tools/<名前>/dist/cli.mjs` の 1 file にまとめる（superbash の toolset の作法 6.5 (c)）。node は `node_modules` の下の TS を動かせず、node 18 は型を除けないので、entry は build の結果の JS を指す。
+
+```
+npm ci
+npm run build    # tools/macbuild/dist/cli.mjs と tools/publish/dist/cli.mjs を作る
+npm test
+```
+
+- まとめる道具は esbuild、定義と引数の読みは citty。どちらも `devDependencies`（superbash は `dependencies` だけを生成した package に写す）。citty は `dist/cli.mjs` の中に入っているので、実行の時は何も取りに行かない。`dist/` は node 18 で動く形（`target: node18`、ESM）。
+- **`dist/` は repo に commit する**（git の repo の名前で指す使い方があるため）。source（`src/`）を変えたら `npm run build` をして `dist/` も commit する。CI（`.github/workflows/ci.yml`）は build し直して `git diff --exit-code` で差分が無い事を確かめる。
+- 構成は上の「構成」。manifest（`.manifest/toolconfig.json`）が正本で、citty の定義（名前・説明・引数）は手で同じに書き、`tests/citty.test.js` が `src/main.ts` を読み込んで `subCommands` を辿り、manifest と照合する（作法 6.2 (a)）。
+- 入口は citty の `runMain` を使わない（引数のどこかに `-h` があると usage を出して終了 0 で抜け、誤りの終了 code が全部 1 になるため）。`cli.ts` が argv を厳しく検査し（知らない option・2 度の option・値の無い option・多すぎる／足りない positional は終了 2。options の後に `--`、その後が positional）、`runCommand` に渡す。
+- test は、`src/lib/*.ts` を node の型の除去で直に読み込む（**node 22.18 以上**で test を回す）。command の実行の test は `dist/cli.mjs` を子 process で起動する。配る物（`dist/cli.mjs`）の動く node は 18 以上。
+
 ## 前提
 
 - macOS、node 18 以上、`codesign`（OS に有る）。
@@ -219,7 +239,7 @@ toolset を変えたら `package.json` の `version` を上げる。superbash �
 npm test
 ```
 
-node:test で、manifest（入れ子）と CLI の引数の表・help の並びの整合、argv の組み立て（superbash の入れ子の規則と `--` → CLI）、宛先を持たない事（設定 key・環境変数・URL の定数・URL を組む code が `tools/` と manifest に無い事）、設定の読み込み（環境変数と file の優先・未知の key の警告）、排他の振る舞い（SIGKILL の後に取れる事を含む）、子の環境から秘密の変数を外す事と出力・log での伏せ（偽の identity と偽の `APPLE_*` の値で）、偽の Tauri の CLI と ad-hoc の codesign による build・署名の流れを確かめる。偽の identity では本物の codesign を呼ばない（keychain を引かせない）。一時の dir は `os.tmpdir()`（`TMPDIR`）の下に作って消す。
+node:test で、manifest（入れ子）と citty の定義の照合（`tests/citty.test.js`）・help の並びの整合、argv の組み立て（superbash の入れ子の規則と `--` → CLI）、宛先を持たない事（設定 key・環境変数・URL の定数・URL を組む code が `tools/` と manifest に無い事）、設定の読み込み（環境変数と file の優先・未知の key の警告）、排他の振る舞い（SIGKILL の後に取れる事を含む）、子の環境から秘密の変数を外す事と出力・log での伏せ（偽の identity と偽の `APPLE_*` の値で）、偽の Tauri の CLI と ad-hoc の codesign による build・署名の流れを確かめる。偽の identity では本物の codesign を呼ばない（keychain を引かせない）。一時の dir は `os.tmpdir()`（`TMPDIR`）の下に作って消す。
 
 公開操作の test（`tests/publish.test.js`）は、偽の npm・gh（PATH の先に置く stub。argv を記録する）、`127.0.0.1` に立てる偽の Gitea API server、偽の HOME の使い捨ての git 設定（偽の credential helper）で、組み立てた argv・API の要求（asset の multipart を含む）・出力・秘密の伏せを確かめる。実際の npmjs・GitHub・Gitea には何も書かない。test は HOME を偽にし、npm は使い捨ての cache・prefix・userconfig（`NPM_CONFIG_CACHE`・`NPM_CONFIG_PREFIX`・`NPM_CONFIG_USERCONFIG`）で回すと、host の npm の設定に触れない。
 

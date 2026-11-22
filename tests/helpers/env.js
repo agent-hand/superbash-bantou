@@ -7,7 +7,7 @@ const os = require('node:os');
 const path = require('node:path');
 
 const ROOT = path.resolve(__dirname, '..', '..');
-const MAIN = path.join(ROOT, 'tools', 'macbuild', 'main.js');
+const MAIN = path.join(ROOT, 'tools', 'macbuild', 'dist', 'cli.mjs');
 const MANIFEST = path.join(ROOT, '.manifest', 'toolconfig.json');
 
 // 偽の秘密（実在しない identity・資格の値）。出力と log に出ない事を確かめるのに使う。

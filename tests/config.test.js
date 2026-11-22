@@ -6,8 +6,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 
-const { loadConfig, defaultConfigPath, codesignIdentity } = require('../tools/macbuild/lib/config');
-const { EnvError, EXIT } = require('../tools/macbuild/lib/errors');
+const { loadConfig, defaultConfigPath, codesignIdentity } = require('../tools/macbuild/src/lib/config.ts');
+const { EnvError, EXIT } = require('../tools/macbuild/src/lib/errors.ts');
 const { FAKE, makeTmp, rmTmp, cleanEnv, runCli } = require('./helpers/env');
 
 function withTmp(fn) {
