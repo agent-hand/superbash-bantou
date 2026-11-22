@@ -18,7 +18,7 @@ const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'))
 
 test('package.json は toolset の形（bin を並べない・files は .manifest/ と tools/）', () => {
   assert.equal(pkg.name, 'superbash-bantou');
-  assert.equal(pkg.version, '0.4.0');
+  assert.equal(pkg.version, '0.5.0');
   assert.equal(pkg.license, 'MIT');
   assert.equal(pkg.repository.url, 'git+https://github.com/agent-hand/superbash-bantou.git');
   assert.deepEqual(pkg.files, ['.manifest/', 'tools/']);
@@ -44,6 +44,9 @@ test('toolconfig.json の tools と、入れ子の commands の木', () => {
     assert.ok(fs.statSync(entry).isFile(), 'entry が無い');
     fs.accessSync(entry, fs.constants.X_OK); // wrapper は entry を直に起動する
     assert.match(fs.readFileSync(entry, 'utf8'), /^#!\/usr\/bin\/env node\n/);
+    // module（読み込んでも走らない。main と run を出す）。superbash 0.2.0 は知らないので、entry のままで動く。
+    assert.equal(manifest.tools[tool].module, 'dist/main.mjs');
+    assert.ok(fs.statSync(path.join(ROOT, 'tools', tool, manifest.tools[tool].module)).isFile(), 'module が無い');
   }
 
   // 上の要素と、spec.subcommand（argv の頭の語）
@@ -78,7 +81,7 @@ test('toolconfig.json の tools と、入れ子の commands の木', () => {
     assert.equal(typeof node.description, 'string', name);
     if (depth === 1) {
       assert.ok(['macbuild', 'publish'].includes(node.tool), name);
-      assert.equal(node.version, '0.4.0', name);
+      assert.equal(node.version, '0.5.0', name);
     } else {
       assert.equal(node.tool, undefined, `${name}: tool は上の要素だけ`);
       assert.equal(node.version, undefined, `${name}: version は上の要素だけ`);
