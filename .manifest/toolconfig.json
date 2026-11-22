@@ -8,11 +8,19 @@
   "tools": {
     "macbuild": {
       "entry": "dist/cli.mjs",
-      "module": "dist/main.mjs"
+      "module": "dist/main.mjs",
+      "sandbox": {
+        "write": ["~", "$TMPDIR"],
+        "network": true
+      }
     },
     "publish": {
       "entry": "dist/cli.mjs",
-      "module": "dist/main.mjs"
+      "module": "dist/main.mjs",
+      "sandbox": {
+        "write": ["~/.npm", "~/.config/gh", "$TMPDIR"],
+        "network": true
+      }
     }
   },
   "commands": [
@@ -21,7 +29,7 @@
       "description": "mac でしか出来ない build（Tauri）と codesign の署名の窓口。署名の identity・updater の鍵・公証の資格は host の設定から読み、道具の引数にも出力にも出さない。",
       "category": "build",
       "tool": "macbuild",
-      "version": "0.5.0",
+      "version": "0.6.0",
       "subcommands": [
         {
           "name": "info",
@@ -146,7 +154,7 @@
       "description": "npm の package を publish する（実際に公開される）。host の npm の設定（npm login）を使う。",
       "category": "publish",
       "tool": "publish",
-      "version": "0.5.0",
+      "version": "0.6.0",
       "spec": {
         "subcommand": "npm"
       },
@@ -209,7 +217,7 @@
       "description": "GitHub の repo と release を作る（実際に作られる）。host の gh の認証を使う。",
       "category": "publish",
       "tool": "publish",
-      "version": "0.5.0",
+      "version": "0.6.0",
       "spec": {
         "subcommand": "github"
       },
@@ -340,7 +348,7 @@
       "description": "Gitea の repo と release を作る（実際に作られる）。Gitea の URL は呼ぶ時の --url で受け、token は git credential fill で引く。",
       "category": "publish",
       "tool": "publish",
-      "version": "0.5.0",
+      "version": "0.6.0",
       "spec": {
         "subcommand": "gitea"
       },

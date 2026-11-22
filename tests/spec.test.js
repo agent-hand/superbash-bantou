@@ -18,7 +18,7 @@ const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'))
 
 test('package.json は toolset の形（bin を並べない・files は .manifest/ と tools/）', () => {
   assert.equal(pkg.name, 'superbash-bantou');
-  assert.equal(pkg.version, '0.5.0');
+  assert.equal(pkg.version, '0.6.0');
   assert.equal(pkg.license, 'MIT');
   assert.equal(pkg.repository.url, 'git+https://github.com/agent-hand/superbash-bantou.git');
   assert.deepEqual(pkg.files, ['.manifest/', 'tools/']);
@@ -35,6 +35,16 @@ function walkAll(commands) {
   for (const top of commands) walk(top, [top.name], top);
   return out;
 }
+
+test('tools.<名前>.sandbox: superbash 0.4.0 の --sandbox の方針（write の path と network。宛先は書かない）', () => {
+  assert.deepEqual(manifest.tools.macbuild.sandbox, { write: ['~', '$TMPDIR'], network: true });
+  assert.deepEqual(manifest.tools.publish.sandbox, { write: ['~/.npm', '~/.config/gh', '$TMPDIR'], network: true });
+  for (const t of Object.values(manifest.tools)) {
+    assert.deepEqual(Object.keys(t.sandbox).sort(), ['network', 'write']);
+    assert.equal(typeof t.sandbox.network, 'boolean');
+    for (const w of t.sandbox.write) assert.match(w, /^(~|\$TMPDIR|\.)(\/|$)/);
+  }
+});
 
 test('toolconfig.json の tools と、入れ子の commands の木', () => {
   assert.equal(manifest.name, 'superbash-bantou');
@@ -81,7 +91,7 @@ test('toolconfig.json の tools と、入れ子の commands の木', () => {
     assert.equal(typeof node.description, 'string', name);
     if (depth === 1) {
       assert.ok(['macbuild', 'publish'].includes(node.tool), name);
-      assert.equal(node.version, '0.5.0', name);
+      assert.equal(node.version, '0.6.0', name);
     } else {
       assert.equal(node.tool, undefined, `${name}: tool は上の要素だけ`);
       assert.equal(node.version, undefined, `${name}: version は上の要素だけ`);
