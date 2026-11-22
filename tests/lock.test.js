@@ -12,8 +12,8 @@ const nodeTest = require('node:test');
 // macbuild は darwin 専用（O_EXLOCK の kernel の lock）。darwin 以外では skip にする。
 const test = (name, fn) => nodeTest(name, { skip: process.platform !== 'darwin' && 'darwin 専用' }, fn);
 
-const lock = require('../tools/macbuild/lib/lock');
-const { EXIT } = require('../tools/macbuild/lib/errors');
+const lock = require('../tools/macbuild/src/lib/lock.ts');
+const { EXIT } = require('../tools/macbuild/src/lib/errors.ts');
 const { makeTmp, rmTmp, cleanEnv, runCli, makeFakeProject, readRecord } = require('./helpers/env');
 
 const CHILD = path.join(__dirname, 'helpers', 'lock-child.js');

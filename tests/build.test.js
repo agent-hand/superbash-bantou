@@ -10,9 +10,9 @@ const nodeTest = require('node:test');
 // macbuild は darwin 専用（codesign と mac の build の道具）。darwin 以外では skip にする。
 const test = (name, fn) => nodeTest(name, { skip: process.platform !== 'darwin' && 'darwin 専用' }, fn);
 
-const codesign = require('../tools/macbuild/lib/codesign');
-const { EXIT } = require('../tools/macbuild/lib/errors');
-const { signArtifact } = require('../tools/macbuild/lib/sign');
+const codesign = require('../tools/macbuild/src/lib/codesign.ts');
+const { EXIT } = require('../tools/macbuild/src/lib/errors.ts');
+const { signArtifact } = require('../tools/macbuild/src/lib/sign.ts');
 const {
   FAKE,
   makeTmp,

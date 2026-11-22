@@ -4,7 +4,7 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
-const { scrubEnv, secretsOf, makeRedactor } = require('../tools/macbuild/lib/secrets');
+const { scrubEnv, secretsOf, makeRedactor } = require('../tools/macbuild/src/lib/secrets.ts');
 const { FAKE } = require('./helpers/env');
 
 test('scrubEnv: APPLE_*・TAURI_SIGNING_*・Tauri v1 の鍵の変数と、設定が名前で指す変数を外す', () => {

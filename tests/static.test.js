@@ -19,7 +19,7 @@ function walk(dir, out = []) {
 }
 
 test('tools/ の code は shell を通さない（shell の option・exec・sh -c を使わない）', () => {
-  const files = walk(path.join(ROOT, 'tools')).filter((f) => f.endsWith('.js'));
+  const files = walk(path.join(ROOT, 'tools')).filter((f) => f.includes(`${path.sep}src${path.sep}`)).filter((f) => f.endsWith('.ts'));
   assert.ok(files.length > 0);
   const forbidden = [
     /\bshell\s*:/, // spawn の shell の option
@@ -35,7 +35,7 @@ test('tools/ の code は shell を通さない（shell の option・exec・sh -
 });
 
 test('宛先を持たない: tools/ の code と manifest に、設定 key・環境変数・URL の定数・URL を組む code が無い', () => {
-  const files = [...walk(path.join(ROOT, 'tools')).filter((f) => f.endsWith('.js')), path.join(ROOT, '.manifest', 'toolconfig.json')];
+  const files = [...walk(path.join(ROOT, 'tools')).filter((f) => f.includes(`${path.sep}src${path.sep}`)).filter((f) => f.endsWith('.ts')), path.join(ROOT, '.manifest', 'toolconfig.json')];
   const forbidden = [
     /verdaccio/i,
     /PUBLISH_/,
@@ -50,7 +50,7 @@ test('宛先を持たない: tools/ の code と manifest に、設定 key・環
     for (const re of forbidden) assert.equal(re.test(text), false, `${path.relative(ROOT, f)} に ${re}`);
   }
   // host の設定の読み込み（publish の config.js）は無い。
-  assert.equal(fs.existsSync(path.join(ROOT, 'tools', 'publish', 'lib', 'config.js')), false);
+  assert.equal(fs.existsSync(path.join(ROOT, 'tools', 'publish', 'src', 'lib', 'config.ts')), false);
 });
 
 test('repo の file に手元の home の path を入れない', () => {

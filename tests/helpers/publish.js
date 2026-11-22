@@ -9,7 +9,7 @@ const path = require('node:path');
 
 const { ROOT, makeTmp } = require('./env');
 
-const MAIN = path.join(ROOT, 'tools', 'publish', 'main.js');
+const MAIN = path.join(ROOT, 'tools', 'publish', 'dist', 'cli.mjs');
 
 // 偽の秘密（実在しない値）。出力に出ない事を確かめるのに使う。
 const FAKE = Object.freeze({

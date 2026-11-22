@@ -7,8 +7,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 
-const { COMMANDS } = require('../tools/macbuild/lib/commands');
-const { EXIT } = require('../tools/macbuild/lib/errors');
+const { EXIT } = require('../tools/macbuild/src/lib/errors.ts');
 const { ROOT, MAIN, MANIFEST, makeTmp, rmTmp, cleanEnv, runCli } = require('./helpers/env');
 const { leaves } = require('./helpers/spec-in');
 
@@ -19,7 +18,7 @@ const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'))
 
 test('package.json は toolset の形（bin を並べない・files は .manifest/ と tools/）', () => {
   assert.equal(pkg.name, 'superbash-bantou');
-  assert.equal(pkg.version, '0.3.0');
+  assert.equal(pkg.version, '0.4.0');
   assert.equal(pkg.license, 'MIT');
   assert.equal(pkg.repository.url, 'git+https://github.com/agent-hand/superbash-bantou.git');
   assert.deepEqual(pkg.files, ['.manifest/', 'tools/']);
@@ -79,7 +78,7 @@ test('toolconfig.json の tools と、入れ子の commands の木', () => {
     assert.equal(typeof node.description, 'string', name);
     if (depth === 1) {
       assert.ok(['macbuild', 'publish'].includes(node.tool), name);
-      assert.equal(node.version, '0.3.0', name);
+      assert.equal(node.version, '0.4.0', name);
     } else {
       assert.equal(node.tool, undefined, `${name}: tool は上の要素だけ`);
       assert.equal(node.version, undefined, `${name}: version は上の要素だけ`);
@@ -95,26 +94,6 @@ test('toolconfig.json の tools と、入れ子の commands の木', () => {
         assert.ok(Object.values(EXIT).includes(Number(code)), `${name} の終了 code ${code} を CLI が使わない`);
       }
     }
-  }
-});
-
-test('CLI の引数の表は葉の spec.in と同じ（並びの名前・argv の頭・flag・型・順・optional）', () => {
-  assert.deepEqual(
-    macbuildLeaves.map((l) => l.head.join(' ')).sort(),
-    Object.keys(COMMANDS).sort(),
-    'CLI の副 command と葉の argv の頭',
-  );
-  for (const l of macbuildLeaves) {
-    const def = COMMANDS[l.head.join(' ')];
-    assert.equal(def.name, l.name);
-    const specOptions = Object.entries(l.node.spec.in.options || {}).map(([key, o]) => ({ key, flag: o.flag, type: o.type }));
-    assert.deepEqual(def.options, specOptions, `${l.name} の options`);
-    const specPositionals = (l.node.spec.in.positionals || []).map((p) => ({
-      name: p.name,
-      type: p.type,
-      optional: Boolean(p.optional),
-    }));
-    assert.deepEqual(def.positionals, specPositionals, `${l.name} の positionals`);
   }
 });
 

@@ -10,17 +10,18 @@ const http = require('node:http');
 const path = require('node:path');
 const test = require('node:test');
 
-const { COMMANDS, parse } = require('../tools/publish/lib/commands');
-const { EXIT } = require('../tools/publish/lib/errors');
-const { makeRedactor } = require('../tools/publish/lib/secrets');
+const { EXIT } = require('../tools/publish/src/lib/errors.ts');
+const { makeRedactor } = require('../tools/publish/src/lib/secrets.ts');
 const { buildArgv, leaves, findLeaf } = require('./helpers/spec-in');
 const { MANIFEST, rmTmp } = require('./helpers/env');
 const H = require('./helpers/publish');
+const { loadDef } = require('./helpers/cli-def');
 
 const manifest = JSON.parse(fs.readFileSync(MANIFEST, 'utf8'));
 const pubTops = manifest.commands.filter((c) => c.tool === 'publish');
 const pubLeaves = leaves(manifest, 'publish');
 const leaf = (name) => findLeaf(manifest, 'publish', name);
+const { parse } = loadDef('publish'); // citty の定義を、入口（cli.ts）と同じ検査・読み方で使う
 const NAMES = ['npm publish', 'github repo create', 'github release create', 'gitea repo create', 'gitea release create'];
 
 const REGISTRY = 'http://registry.example.invalid:4873/';
@@ -55,11 +56,11 @@ const noLeak = (r, ...secrets) => {
 
 // ---- spec と CLI の整合 ----
 
-test('manifest の木: 上の要素は npm・github・gitea（各 spec.subcommand に同じ語）、葉は 5 つ、版は 0.3.0、PR と CI の command は無い', () => {
+test('manifest の木: 上の要素は npm・github・gitea（各 spec.subcommand に同じ語）、葉は 5 つ、版は 0.4.0、PR と CI の command は無い', () => {
   assert.deepEqual(pubTops.map((c) => [c.name, c.spec.subcommand, c.version]), [
-    ['npm', 'npm', '0.3.0'],
-    ['github', 'github', '0.3.0'],
-    ['gitea', 'gitea', '0.3.0'],
+    ['npm', 'npm', '0.4.0'],
+    ['github', 'github', '0.4.0'],
+    ['gitea', 'gitea', '0.4.0'],
   ]);
   assert.deepEqual(pubLeaves.map((l) => l.name), NAMES);
   assert.deepEqual(pubLeaves.map((l) => l.head.join(' ')), NAMES, '葉の argv の頭は並びの名前と同じ');
@@ -71,16 +72,9 @@ test('manifest の木: 上の要素は npm・github・gitea（各 spec.subcomman
   assert.ok(!pubLeaves.some((l) => /(^|\s)(pr|pull|merge|ci|run|status)(\s|$)/.test(l.name)));
 });
 
-test('CLI の引数の表は葉の spec.in と同じ（並びの名前・flag・型・順・optional・usage）', () => {
-  assert.deepEqual(Object.keys(COMMANDS).sort(), [...NAMES].sort());
+test('usage と終了 code は葉の spec と同じ（引数の定義の照合は citty.test.js）', () => {
   for (const l of pubLeaves) {
     const s = l.node.spec;
-    const def = COMMANDS[l.head.join(' ')];
-    assert.equal(def.name, l.name);
-    const opts = Object.entries(s.in.options || {}).map(([key, o]) => ({ key, flag: o.flag, type: o.type }));
-    assert.deepEqual(def.options, opts, l.name);
-    const pos = (s.in.positionals || []).map((p) => ({ name: p.name, type: p.type, optional: Boolean(p.optional) }));
-    assert.deepEqual(def.positionals, pos, l.name);
     assert.ok(s.usage.startsWith(`publish ${l.head.join(' ')}`), s.usage);
     for (const o of Object.values(s.in.options)) assert.ok(s.usage.includes(o.flag), `${l.name} の usage に ${o.flag}`);
     for (const p of s.in.positionals) assert.ok(s.usage.includes(`<${p.name}>`), `${l.name} の usage に <${p.name}>`);
