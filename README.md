@@ -1,8 +1,10 @@
 # superbash-bantou
 
-[superbash](https://github.com/agent-hand/superbash) の toolset（0.6.1）。mac でしか出来ない build（Tauri）と codesign の署名（`macbuild` の下に `info`・`tauri`・`sign`）、npm の package の公開と GitHub・Gitea の repo・release の作成（`npm`・`github`・`gitea` の下のサブコマンド）を、MCP の道具 `superbash-command` の command として出す。
+[superbash](https://github.com/agent-hand/superbash) の toolset（0.6.2）。mac でしか出来ない build（Tauri）と codesign の署名（`macbuild` の下に `info`・`tauri`・`sign`）、npm の package の公開と GitHub・Gitea の repo・release の作成（`npm`・`github`・`gitea` の下のサブコマンド）を、MCP の道具 `superbash-command` の command として出す。
 
 **使える superbash の版: 0.2.0 以上。** 0.3.0 以降の manifest は入れ子のサブコマンド（superbash 0.2.0 で対応）で書いてあり、0.1.x は読めない（群に `spec` が無いので「形が不正」で止まるか、`subcommands` を黙って捨てる）。呼ぶ名前は `macbuild info` のように空白で区切った並び。
+
+0.6.2 は、道具の説明の文の誤りを 2 つ直した版。publish の usage の頭に tool 名が付いていた（呼ぶ名前は `npm publish` のように tool 名を含まない）のを、呼ぶ名前と同じ形にした。gitea の 2 つの終了 code 4 の説明に、使わない gh が挙がっていたのを、実際に要る git だけにした。呼ぶ名前・引数・出力・終了 code の振る舞いは 0.6.1 と同じ。
 
 0.6.1 は、README の「sandbox」に、方針の範囲の限りを足した版（manifest の方針は 0.6.0 のまま）。0.6.0 は、superbash 0.4.0 の `--sandbox` 用の方針を manifest に足した版（下の「sandbox」）。呼ぶ名前・引数・出力・終了 code は 0.5.0 と同じ。
 

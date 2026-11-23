@@ -1128,7 +1128,7 @@ var npm = defineCommand({
 
 // tools/publish/src/main.ts
 var main = defineCommand({
-  meta: { name: "publish", version: "0.6.1", description: "\u516C\u958B\u306E\u64CD\u4F5C\uFF08npm \u306E publish\u3001GitHub\u30FBGitea \u306E repo \u3068 release \u306E\u4F5C\u6210\uFF09" },
+  meta: { name: "publish", version: "0.6.2", description: "\u516C\u958B\u306E\u64CD\u4F5C\uFF08npm \u306E publish\u3001GitHub\u30FBGitea \u306E repo \u3068 release \u306E\u4F5C\u6210\uFF09" },
   subCommands: { help, npm, github, gitea }
 });
 

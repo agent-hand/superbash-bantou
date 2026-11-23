@@ -18,7 +18,7 @@ const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'))
 
 test('package.json は toolset の形（bin を並べない・files は .manifest/ と tools/）', () => {
   assert.equal(pkg.name, 'superbash-bantou');
-  assert.equal(pkg.version, '0.6.1');
+  assert.equal(pkg.version, '0.6.2');
   assert.equal(pkg.license, 'MIT');
   assert.equal(pkg.repository.url, 'git+https://github.com/agent-hand/superbash-bantou.git');
   assert.deepEqual(pkg.files, ['.manifest/', 'tools/']);
@@ -91,7 +91,7 @@ test('toolconfig.json の tools と、入れ子の commands の木', () => {
     assert.equal(typeof node.description, 'string', name);
     if (depth === 1) {
       assert.ok(['macbuild', 'publish'].includes(node.tool), name);
-      assert.equal(node.version, '0.6.1', name);
+      assert.equal(node.version, '0.6.2', name);
     } else {
       assert.equal(node.tool, undefined, `${name}: tool は上の要素だけ`);
       assert.equal(node.version, undefined, `${name}: version は上の要素だけ`);
