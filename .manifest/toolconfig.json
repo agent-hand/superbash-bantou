@@ -29,7 +29,7 @@
       "description": "mac でしか出来ない build（Tauri）と codesign の署名の窓口。署名の identity・updater の鍵・公証の資格は host の設定から読み、道具の引数にも出力にも出さない。",
       "category": "build",
       "tool": "macbuild",
-      "version": "0.6.1",
+      "version": "0.6.2",
       "subcommands": [
         {
           "name": "info",
@@ -154,7 +154,7 @@
       "description": "npm の package を publish する（実際に公開される）。host の npm の設定（npm login）を使う。",
       "category": "publish",
       "tool": "publish",
-      "version": "0.6.1",
+      "version": "0.6.2",
       "spec": {
         "subcommand": "npm"
       },
@@ -163,7 +163,7 @@
           "name": "publish",
           "description": "指定の tarball か dir を npm publish で registry に publish する。registry は --registry で受け、省略時は npm 自身の設定のまま（wrapper は宛先を持たない）。認証は host の npm login（host の npm の設定）をそのまま使い、wrapper は token を読まない。--registry を付けた時、package の publishConfig.registry がそれと違えば publish しない。publish（dry-run 含む）の前に、--registry を付けた時、または scope も publishConfig.registry も無い package の時は、その registry（--registry か npm の既定の registry）に短い上限（10 秒・retry 無し）で届くか npm ping で確かめ、届かなければ publish せずすぐ ok:false（終了 code 1）を返す。--registry が無く、package が scope 付きか publishConfig.registry を持つ時は、npm ping が別の registry を確かめて誤判定するので ping を省き、publish 自身に任せる（出力の pingSkipped が true）（launchd 常駐の process は macOS のローカルネットワーク制限で届かない事がある）。dry-run の成功は registry に届く事と認証を保証しない（この確かめは届く事だけを手当てする）。実際に公開されるので、dry-run で確かめてから使う。長くなりうるので run_in_background で呼ぶ。Claude Code の 1 回の呼び出しの上限（既定 60 秒、mcp 設定の timeout で延ばす）で打ち切られても command は走り続けるので、本番 publish を呼び直す前に registry に出たかを確かめる。",
           "spec": {
-            "usage": "publish npm publish [--registry <url>] [--tag <tag>] [--access <public|restricted>] [--dry-run] <target>",
+            "usage": "npm publish [--registry <url>] [--tag <tag>] [--access <public|restricted>] [--dry-run] <target>",
             "in": {
               "options": {
                 "registry": {
@@ -217,7 +217,7 @@
       "description": "GitHub の repo と release を作る（実際に作られる）。host の gh の認証を使う。",
       "category": "publish",
       "tool": "publish",
-      "version": "0.6.1",
+      "version": "0.6.2",
       "spec": {
         "subcommand": "github"
       },
@@ -230,7 +230,7 @@
               "name": "create",
               "description": "host の gh の CLI（gh repo create）で GitHub の repo を作る。認証は host の gh の認証をそのまま使う。公開範囲の既定は private。",
               "spec": {
-                "usage": "publish github repo create [--visibility <public|private|internal>] [--description <text>] <repo>",
+                "usage": "github repo create [--visibility <public|private|internal>] [--description <text>] <repo>",
                 "in": {
                   "options": {
                     "visibility": {
@@ -262,7 +262,7 @@
                     "0": "repo を作れた",
                     "1": "repo の作成が失敗（認証・権限・重複など。message は伏せてある）",
                     "2": "使い方の誤り（repo・visibility・description の形が不正）",
-                    "4": "host の設定の誤り・道具（gh・git）が無い・認証が取れない"
+                    "4": "gh が PATH に無い"
                   }
                 }
               }
@@ -277,7 +277,7 @@
               "name": "create",
               "description": "host の gh の CLI（gh release create）で GitHub の release を作る（tag・題・本文の file・target・draft・prerelease・asset の添付）。認証は host の gh の認証をそのまま使う。",
               "spec": {
-                "usage": "publish github release create [--title <title>] [--notes-file <file>] [--target <ref>] [--draft] [--prerelease] [--assets <file,...>] <repo> <tag>",
+                "usage": "github release create [--title <title>] [--notes-file <file>] [--target <ref>] [--draft] [--prerelease] [--assets <file,...>] <repo> <tag>",
                 "in": {
                   "options": {
                     "title": {
@@ -334,7 +334,7 @@
                     "0": "release を作れた",
                     "1": "release の作成が失敗（認証・権限・重複など。message は伏せてある）",
                     "2": "使い方の誤り（repo・tag・path の形が不正、file が無い）",
-                    "4": "host の設定の誤り・道具（gh・git）が無い・認証が取れない"
+                    "4": "gh が PATH に無い"
                   }
                 }
               }
@@ -348,7 +348,7 @@
       "description": "Gitea の repo と release を作る（実際に作られる）。Gitea の URL は呼ぶ時の --url で受け、token は git credential fill で引く。",
       "category": "publish",
       "tool": "publish",
-      "version": "0.6.1",
+      "version": "0.6.2",
       "spec": {
         "subcommand": "gitea"
       },
@@ -361,7 +361,7 @@
               "name": "create",
               "description": "Gitea の REST API（/api/v1）を node の fetch から呼んで repo を作る（curl は使わない）。Gitea の URL は --url で受ける（必須）。token は実行時に git credential fill（protocol・host は --url から）で取り出し、出力に出さない。token の持ち主（GET /user の login）が owner と同じなら user の repo、違えば organization の repo。公開範囲の既定は private。",
               "spec": {
-                "usage": "publish gitea repo create --url <url> [--visibility <public|private>] [--description <text>] <repo>",
+                "usage": "gitea repo create --url <url> [--visibility <public|private>] [--description <text>] <repo>",
                 "in": {
                   "options": {
                     "url": {
@@ -398,7 +398,7 @@
                     "0": "repo を作れた",
                     "1": "repo の作成が失敗（認証・権限・重複など。message は伏せてある）",
                     "2": "使い方の誤り（repo・visibility・description の形が不正、--url が無い・不正）",
-                    "4": "host の設定の誤り・道具（gh・git）が無い・認証が取れない"
+                    "4": "host の設定の誤り・git が無い・git の credential から token が取れない"
                   }
                 }
               }
@@ -413,7 +413,7 @@
               "name": "create",
               "description": "Gitea の REST API（/api/v1）を node の fetch から呼んで release を作り、asset を添付する（curl は使わない）。Gitea の URL は --url で受ける（必須）。token は実行時に git credential fill（protocol・host は --url から）で取り出し、出力に出さない。asset の添付が途中で失敗した時は、release は作成済みのまま、url・uploaded・failedAsset を返す。",
               "spec": {
-                "usage": "publish gitea release create --url <url> [--title <title>] [--notes-file <file>] [--target <ref>] [--draft] [--prerelease] [--assets <file,...>] <repo> <tag>",
+                "usage": "gitea release create --url <url> [--title <title>] [--notes-file <file>] [--target <ref>] [--draft] [--prerelease] [--assets <file,...>] <repo> <tag>",
                 "in": {
                   "options": {
                     "url": {
@@ -475,7 +475,7 @@
                     "0": "release を作れた",
                     "1": "release の作成が失敗（認証・権限・重複など。message は伏せてある）",
                     "2": "使い方の誤り（repo・tag・path の形が不正、file が無い）",
-                    "4": "host の設定の誤り・道具（gh・git）が無い・認証が取れない"
+                    "4": "host の設定の誤り・git が無い・git の credential から token が取れない"
                   }
                 }
               }

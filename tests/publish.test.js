@@ -56,11 +56,11 @@ const noLeak = (r, ...secrets) => {
 
 // ---- spec と CLI の整合 ----
 
-test('manifest の木: 上の要素は npm・github・gitea（各 spec.subcommand に同じ語）、葉は 5 つ、版は 0.6.1、PR と CI の command は無い', () => {
+test('manifest の木: 上の要素は npm・github・gitea（各 spec.subcommand に同じ語）、葉は 5 つ、版は 0.6.2、PR と CI の command は無い', () => {
   assert.deepEqual(pubTops.map((c) => [c.name, c.spec.subcommand, c.version]), [
-    ['npm', 'npm', '0.6.1'],
-    ['github', 'github', '0.6.1'],
-    ['gitea', 'gitea', '0.6.1'],
+    ['npm', 'npm', '0.6.2'],
+    ['github', 'github', '0.6.2'],
+    ['gitea', 'gitea', '0.6.2'],
   ]);
   assert.deepEqual(pubLeaves.map((l) => l.name), NAMES);
   assert.deepEqual(pubLeaves.map((l) => l.head.join(' ')), NAMES, '葉の argv の頭は並びの名前と同じ');
@@ -75,13 +75,27 @@ test('manifest の木: 上の要素は npm・github・gitea（各 spec.subcomman
 test('usage と終了 code は葉の spec と同じ（引数の定義の照合は citty.test.js）', () => {
   for (const l of pubLeaves) {
     const s = l.node.spec;
-    assert.ok(s.usage.startsWith(`publish ${l.head.join(' ')}`), s.usage);
+    // usage は MCP で呼ぶ name（並びの名前）と同じ形で始まる（tool 名の publish を頭に付けない）
+    assert.ok(s.usage === l.name || s.usage.startsWith(`${l.name} `), s.usage);
+    assert.ok(!/^publish\s/.test(s.usage), `${l.name}: usage の頭に tool 名を付けない: ${s.usage}`);
     for (const o of Object.values(s.in.options)) assert.ok(s.usage.includes(o.flag), `${l.name} の usage に ${o.flag}`);
     for (const p of s.in.positionals) assert.ok(s.usage.includes(`<${p.name}>`), `${l.name} の usage に <${p.name}>`);
     for (const code of Object.keys(s.out.exitCodes)) {
       assert.ok(Object.values(EXIT).includes(Number(code)), `${l.name} の終了 code ${code}`);
     }
   }
+});
+
+test('終了 code 4 の説明は、その葉が実際に要る物だけを挙げる（gitea は gh を使わない・git の credential で動く）', () => {
+  for (const name of ['gitea repo create', 'gitea release create']) {
+    const four = leaf(name).node.spec.out.exitCodes['4'];
+    assert.ok(!/\bgh\b/.test(four), `${name}: gh を挙げない: ${four}`);
+    assert.ok(/git/.test(four), `${name}: git を挙げる: ${four}`);
+  }
+  for (const name of ['github repo create', 'github release create']) {
+    assert.ok(/gh/.test(leaf(name).node.spec.out.exitCodes['4']), `${name}: gh を挙げる`);
+  }
+  assert.ok(/npm/.test(leaf('npm publish').node.spec.out.exitCodes['4']));
 });
 
 test('組んだ argv（`--` を含む）を CLI が同じ値に読み戻す（shell の記号・`-` で始まる値も）', () => {

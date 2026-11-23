@@ -8,6 +8,6 @@ import { npm } from './command/npm/index.ts';
 
 // 1 段目の key は、上の要素の spec.subcommand（npm・github・gitea）と、必須の help。
 export const main = defineCommand({
-  meta: { name: 'publish', version: '0.6.1', description: '公開の操作（npm の publish、GitHub・Gitea の repo と release の作成）' },
+  meta: { name: 'publish', version: '0.6.2', description: '公開の操作（npm の publish、GitHub・Gitea の repo と release の作成）' },
   subCommands: { help, npm, github, gitea },
 });
